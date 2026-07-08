@@ -1,0 +1,7 @@
+name = "takt-web"
+compatibility_date = "2026-07-08"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "takt-web"
+database_id = "4f275415-6b4a-4030-b748-9733ed3cb280"
