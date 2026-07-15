@@ -1,8 +1,4 @@
-:root {
-  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
-  line-height: 1.5;
-  color-scheme: light dark;
-}
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
 
 *,
 *::before,
@@ -10,7 +6,96 @@
   box-sizing: border-box;
 }
 
+html,
 body {
   margin: 0;
+  padding: 0;
+}
+
+:root {
+  font-family: -apple-system, system-ui, 'Manrope', sans-serif;
+  line-height: 1.5;
+
+  --page: radial-gradient(900px 600px at 12% -8%, #e9ecf5, transparent 60%),
+    radial-gradient(900px 600px at 95% 110%, #e7f3ec, transparent 60%), #eceef4;
+  --ink: #0b1020;
+  --ink2: #5b6577;
+  --ink3: #9aa3b2;
+  --glass: rgba(255, 255, 255, 0.55);
+  --glass-strong: rgba(255, 255, 255, 0.74);
+  --border: rgba(255, 255, 255, 0.85);
+  --hair: rgba(11, 16, 32, 0.08);
+  --track: rgba(11, 16, 32, 0.09);
+  --screen: radial-gradient(760px 520px at 82% -12%, rgba(124, 92, 255, 0.16), transparent 60%),
+    radial-gradient(680px 520px at -12% 112%, rgba(37, 99, 235, 0.14), transparent 60%),
+    radial-gradient(620px 460px at 116% 120%, rgba(34, 197, 94, 0.15), transparent 62%), #f4f6fb;
+  --screen-solid: #f4f6fb;
+  --shadow: 0 30px 70px rgba(17, 24, 39, 0.2);
+  --veil: rgba(232, 235, 242, 0.55);
+  --cell: #fdfdff;
+}
+
+[data-theme='dark'] {
+  --page: radial-gradient(900px 600px at 12% -8%, #14132a, transparent 60%),
+    radial-gradient(900px 600px at 95% 110%, #0c1f1a, transparent 60%), #08090f;
+  --ink: #f3f5fa;
+  --ink2: #aab2c2;
+  --ink3: #6b7387;
+  --glass: rgba(30, 33, 46, 0.55);
+  --glass-strong: rgba(38, 41, 57, 0.72);
+  --border: rgba(255, 255, 255, 0.1);
+  --hair: rgba(255, 255, 255, 0.08);
+  --track: rgba(255, 255, 255, 0.1);
+  --screen: radial-gradient(760px 520px at 82% -12%, rgba(124, 92, 255, 0.22), transparent 60%),
+    radial-gradient(680px 520px at -12% 112%, rgba(37, 99, 235, 0.2), transparent 60%),
+    radial-gradient(620px 460px at 116% 120%, rgba(34, 197, 94, 0.18), transparent 62%), #0b0d16;
+  --screen-solid: #0b0d16;
+  --shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+  --veil: rgba(6, 7, 12, 0.55);
+  --cell: #2a2d3c;
+}
+
+body {
   min-height: 100vh;
+  color: var(--ink);
+}
+
+/* Scrollbar unsichtbar, Inhalt bleibt scrollbar (keine grauen Ränder). */
+.no-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* alte Edge/IE */
+}
+.no-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+@keyframes pulseDot {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.7);
+  }
+}
+
+@keyframes popIn {
+  0% {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
