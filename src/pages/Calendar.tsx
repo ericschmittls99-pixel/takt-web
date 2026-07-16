@@ -107,6 +107,8 @@ interface Draft {
   end: string
   scope: 'day' | 'plan'
   splitAt: string // HH:MM für "Teilen bei"
+  kind?: 'plan' | 'log' // 'log' = Ist-Aktivität erfassen (nur neue Blöcke in der Wochenansicht)
+  note?: string
 }
 
 function sameBlock(b: PlanBlock, edited: PlanBlock | null): boolean {
@@ -166,17 +168,28 @@ function BlockEditor({
     background: on ? `color-mix(in srgb, ${color} 16%, transparent)` : 'var(--glass)',
     border: `1.5px solid ${on ? color : 'var(--border)'}`, color: 'var(--ink)', fontSize: 14, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap',
   })
+  const kind = draft.kind ?? 'plan'
+  const canKind = draft.block === null && !draft.planner // neue Buchung in der Wochenansicht: Plan oder Erfassen
 
   return (
     <div onClick={onClose} style={{ position: 'absolute', inset: 0, zIndex: 65, background: 'var(--veil)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 40 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: 560, maxHeight: '88%', display: 'flex', flexDirection: 'column', borderRadius: 30, background: 'var(--screen)', border: '1px solid var(--border)', boxShadow: 'var(--shadow)', overflow: 'hidden', animation: 'popIn .18s ease' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '26px 30px 16px' }}>
-          <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--ink)', letterSpacing: '-0.5px' }}>{draft.block === null ? (draft.planner ? 'Neuer Plan-Block' : 'Neuer Block') : 'Block bearbeiten'}</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--ink)', letterSpacing: '-0.5px' }}>{draft.block === null ? (draft.planner ? 'Neuer Plan-Block' : kind === 'log' ? 'Aktivität erfassen' : 'Neuer Block') : 'Block bearbeiten'}</div>
           <div onClick={onClose} style={{ width: 40, height: 40, borderRadius: 13, ...GLASS, display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--ink2)', fontSize: 18, fontWeight: 600 }}>✕</div>
         </div>
 
         <div style={{ padding: '0 30px 28px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
-          {!draft.planner && (
+          {canKind && (
+            <div style={{ display: 'flex', padding: 3, gap: 3, borderRadius: 13, background: 'var(--glass)', border: '1px solid var(--border)' }}>
+              {(['plan', 'log'] as const).map((k) => (
+                <div key={k} onClick={() => onChange({ kind: k })} style={{ flex: 1, textAlign: 'center', padding: '9px 12px', borderRadius: 10, fontSize: 13, fontWeight: 800, cursor: 'pointer', color: kind === k ? 'var(--ink)' : 'var(--ink3)', background: kind === k ? 'var(--glass-strong)' : 'transparent', boxShadow: kind === k ? '0 2px 8px var(--hair)' : 'none' }}>
+                  {k === 'plan' ? 'Plan' : 'Erfassen'}
+                </div>
+              ))}
+            </div>
+          )}
+          {!draft.planner && kind === 'plan' && (
             <div style={{ display: 'flex', padding: 3, gap: 3, borderRadius: 13, background: 'var(--glass)', border: '1px solid var(--border)' }}>
               {(['day', 'plan'] as const).map((s) => (
                 <div key={s} onClick={() => onChange({ scope: s })} style={{ flex: 1, textAlign: 'center', padding: '9px 12px', borderRadius: 10, fontSize: 13, fontWeight: 800, cursor: 'pointer', color: draft.scope === s ? 'var(--ink)' : 'var(--ink3)', background: draft.scope === s ? 'var(--glass-strong)' : 'transparent', boxShadow: draft.scope === s ? '0 2px 8px var(--hair)' : 'none' }}>
@@ -230,6 +243,13 @@ function BlockEditor({
               <TimeField value={draft.end} onChange={(v) => onChange({ end: v })} style={{ width: '100%', boxSizing: 'border-box', borderRadius: 14, border: '1px solid var(--hair)', background: 'var(--glass)', padding: '12px 14px', fontSize: 16, fontWeight: 700, color: 'var(--ink)', fontFamily: 'inherit', outline: 'none' }} />
             </div>
           </div>
+
+          {kind === 'log' && (
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '1.5px', textTransform: 'uppercase', color: 'var(--ink3)', marginBottom: 8 }}>Notiz <span style={{ fontWeight: 600, textTransform: 'none', letterSpacing: 0 }}>· optional</span></div>
+              <input value={draft.note ?? ''} onChange={(e) => onChange({ note: e.target.value })} placeholder="Woran hast du gearbeitet?" style={{ width: '100%', boxSizing: 'border-box', borderRadius: 14, border: '1px solid var(--hair)', background: 'var(--glass)', padding: '12px 14px', fontSize: 15, fontWeight: 600, color: 'var(--ink)', fontFamily: 'inherit', outline: 'none' }} />
+            </div>
+          )}
 
           {draft.block !== null && (
             <div style={{ borderTop: '1px solid var(--hair)', paddingTop: 18 }}>
@@ -644,6 +664,22 @@ export default function Calendar({ theme, onToggleTheme, onBack, onOpenTodos, on
     const end_min = hhmmToMin(editor.end)
     if (end_min <= start_min) {
       setEditError('Ende muss nach dem Start liegen')
+      return
+    }
+    // "Erfassen": echte Ist-Aktivität für diesen Tag anlegen (statt Planblock).
+    if (editor.kind === 'log') {
+      setBusy(true)
+      setEditError(null)
+      try {
+        const created = await api.createEntry({ start_ts: `${editor.date}T${editor.start}:00`, employer_id: editor.employerId, project_id: editor.projectId, note: (editor.note ?? '').trim() || null })
+        await api.updateEntry(created.id, { end_ts: `${editor.date}T${editor.end}:00` })
+        await reloadEntries()
+        setEditor(null)
+      } catch (e) {
+        setEditError(e instanceof Error ? e.message : 'Speichern fehlgeschlagen')
+      } finally {
+        setBusy(false)
+      }
       return
     }
     const emp = editor.employerId

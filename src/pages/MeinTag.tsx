@@ -629,20 +629,20 @@ function IconBtn({
 interface AddModalProps {
   employers: Employer[]
   projects: Project[]
-  selectedDay: Date
   onClose: () => void
   onCreated: () => void
 }
 
 // Neue Aktivität anlegen. Aufbau wie der EntryEditor (Bereich → Projekt → Notiz),
 // „Erfassen" ergänzt Start/Ende, „Live" startet stattdessen den Timer.
-function AddModal({ employers, projects, selectedDay, onClose, onCreated }: AddModalProps) {
+function AddModal({ employers, projects, onClose, onCreated }: AddModalProps) {
   const [mode, setMode] = useState<'live' | 'log'>('live')
   const [employerId, setEmployerId] = useState<number | null>(employers.find((e) => e.active === 1)?.id ?? employers[0]?.id ?? null)
   const [projectId, setProjectId] = useState<number | null>(null)
   const [note, setNote] = useState('')
   const [startTime, setStartTime] = useState(fmtClock(new Date()))
   const [endTime, setEndTime] = useState(fmtClock(new Date()))
+  const [logDate, setLogDate] = useState(dayKey(new Date())) // Erfassen-Datum, Default heute
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -665,8 +665,9 @@ function AddModal({ employers, projects, selectedDay, onClose, onCreated }: AddM
       if (mode === 'live') {
         await api.createEntry({ start_ts: new Date().toISOString(), employer_id: employerId, project_id: projectId, note: n })
       } else {
-        const created = await api.createEntry({ start_ts: isoFromDayTime(selectedDay, startTime), employer_id: employerId, project_id: projectId, note: n })
-        await api.updateEntry(created.id, { end_ts: isoFromDayTime(selectedDay, endTime) })
+        const day = new Date(`${logDate}T00:00:00`)
+        const created = await api.createEntry({ start_ts: isoFromDayTime(day, startTime), employer_id: employerId, project_id: projectId, note: n })
+        await api.updateEntry(created.id, { end_ts: isoFromDayTime(day, endTime) })
       }
       onCreated()
       onClose()
@@ -738,12 +739,18 @@ function AddModal({ employers, projects, selectedDay, onClose, onCreated }: AddM
           <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Woran arbeitest du?" style={{ width: '100%', boxSizing: 'border-box', borderRadius: 14, border: '1px solid var(--hair)', background: 'var(--glass)', padding: '12px 14px', fontSize: 15, fontWeight: 600, color: 'var(--ink)', fontFamily: 'inherit', outline: 'none' }} />
         </div>
 
-        {/* Start / Ende (nur Erfassen) */}
+        {/* Datum + Start / Ende (nur Erfassen) */}
         {mode === 'log' && (
-          <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
-            <div style={{ flex: 1 }}><div style={label}>Start</div><TimeField value={startTime} onChange={setStartTime} style={timeField} /></div>
-            <div style={{ flex: 1 }}><div style={label}>Ende</div><TimeField value={endTime} onChange={setEndTime} style={timeField} /></div>
-          </div>
+          <>
+            <div style={{ marginTop: 16 }}>
+              <div style={label}>Datum</div>
+              <input type="date" lang="de-DE" value={logDate} onChange={(e) => setLogDate(e.target.value)} style={{ ...timeField, fontSize: 15 }} />
+            </div>
+            <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
+              <div style={{ flex: 1 }}><div style={label}>Start</div><TimeField value={startTime} onChange={setStartTime} style={timeField} /></div>
+              <div style={{ flex: 1 }}><div style={label}>Ende</div><TimeField value={endTime} onChange={setEndTime} style={timeField} /></div>
+            </div>
+          </>
         )}
 
         {error && <div style={{ fontSize: 13, fontWeight: 700, color: '#E5484D', marginTop: 14 }}>{error}</div>}
@@ -1592,7 +1599,6 @@ export default function MeinTag({ theme, onToggleTheme, onOpenTodos, onOpenCalen
           <AddModal
             employers={employers}
             projects={projects}
-            selectedDay={selectedDay}
             onClose={() => setAddOpen(false)}
             onCreated={loadEntries}
           />
