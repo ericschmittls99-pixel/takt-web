@@ -88,8 +88,8 @@ export default function Auswertung({ theme, onToggleTheme, onBack, onOpenCalenda
   const [areaPop, setAreaPop] = useState<number | null>(null)
   const [drill, setDrill] = useState<{ from: Date; to: Date; employerId: number; projectId: number | null; name: string; color: string } | null>(null)
   const [editEntry, setEditEntry] = useState<Entry | null>(null)
-  const [sollMode, setSollMode] = useState<'todate' | 'full'>('todate')
   const [splitByArea, setSplitByArea] = useState(false)
+  const [projChart, setProjChart] = useState<string | null>(null) // aufgeklapptes Projekt (Verteilungs-Chart)
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null)
   const [now] = useState(() => new Date())
 
@@ -124,7 +124,8 @@ export default function Auswertung({ theme, onToggleTheme, onBack, onOpenCalenda
 
   const todayKey = dayKey(startOfDay(now))
   const nowMin = now.getHours() * 60 + now.getMinutes()
-  const includedEmp = areaFilter === 'all' ? employers.map((e) => e.id) : [areaFilter]
+  // "Gesamt" bezieht sich – wie der Wochen-Saldo – nur auf Arbeitsbereiche; private einzeln über die Chips.
+  const includedEmp = areaFilter === 'all' ? employers.filter((e) => e.kind === 'work').map((e) => e.id) : [areaFilter]
 
   const employersById = useMemo(() => new Map(employers.map((e) => [e.id, e])), [employers])
   const colorFor = (empId: number): string => employersById.get(empId)?.color ?? employerColor(empId)
@@ -168,8 +169,8 @@ export default function Auswertung({ theme, onToggleTheme, onBack, onOpenCalenda
     if (key < settings.start_date) return 0 // harter Stichtag: davor kein Ist
     return (entryMin.get(key)?.get(empId) ?? 0) + absenceIstDay(key, empId)
   }
-  // Soll je Tag – im "bis jetzt"-Modus zählen künftige Tage nicht.
-  const sollDayFn = (key: string, id: number) => (sollMode === 'todate' && key > todayKey ? 0 : dailySoll(id, key))
+  // Soll je Tag – künftige Tage (nach heute) zählen nicht: Konto immer bis Ende des heutigen Tages.
+  const sollDayFn = (key: string, id: number) => (key > todayKey ? 0 : dailySoll(id, key))
   function sumRange(from: Date, to: Date, empIds: number[], fn: (key: string, id: number) => number): number {
     let total = 0
     for (let d = startOfDay(from); d.getTime() <= startOfDay(to).getTime(); d = addDays(d, 1)) {
@@ -221,13 +222,20 @@ export default function Auswertung({ theme, onToggleTheme, onBack, onOpenCalenda
   const subData = useMemo(
     () => subs.map((sp) => ({ sp, ist: sumRange(sp.from, sp.to, includedEmp, istDayEmp), soll: sumRange(sp.from, sp.to, includedEmp, sollDayFn) })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [subs, includedEmp, entryMin, absences, areaHours, sollMode, todayKey, settings.start_date],
+    [subs, includedEmp, entryMin, absences, areaHours, todayKey, settings.start_date],
   )
   const totalIst = subData.reduce((s, x) => s + x.ist, 0)
   const totalSoll = subData.reduce((s, x) => s + x.soll, 0)
   const scaleMax = Math.max(1, ...subData.map((x) => Math.max(x.ist, x.soll)))
 
-  const accent = areaFilter === 'all' ? 'var(--accent, #22C55E)' : employerColor(areaFilter)
+  const accent = areaFilter === 'all' ? 'var(--accent, #22C55E)' : colorFor(areaFilter)
+
+  // Privat: kein Saldo, sondern % des (anteilig auf die Periode hochgerechneten) Wochenziels.
+  const selEmp = areaFilter === 'all' ? null : employersById.get(areaFilter)
+  const isPrivSel = selEmp?.kind === 'private'
+  const periodDays = Math.round((startOfDay(periodTo).getTime() - startOfDay(periodFrom).getTime()) / 86400000) + 1
+  const periodGoal = isPrivSel ? (selEmp!.weekly_goal_min * periodDays) / 7 : 0
+  const goalPctSel = periodGoal > 0 ? Math.round((totalIst / periodGoal) * 100) : 0
 
   // Projekte (mit Ist-Minuten) im Zeitraum für die Bereiche.
   function projectAgg(from: Date, to: Date, empIds: number[]) {
@@ -248,6 +256,20 @@ export default function Auswertung({ theme, onToggleTheme, onBack, onOpenCalenda
       row.min += Math.max(0, dur)
     }
     return [...map.values()].sort((a, b) => b.min - a.min)
+  }
+
+  // Erfasste Minuten eines Projekts (employer+project) in einem Zeitraum – für den Verteilungs-Chart.
+  function projMinRange(from: Date, to: Date, employerId: number, projectId: number | null): number {
+    const fk = dayKey(startOfDay(from))
+    const tk = dayKey(startOfDay(to))
+    let m = 0
+    for (const e of entries) {
+      if (e.employer_id !== employerId || (e.project_id ?? null) !== projectId) continue
+      const k = dayKey(new Date(e.start_ts))
+      if (k < fk || k > tk) continue
+      m += e.end_ts === null ? (now.getTime() - Date.parse(e.start_ts)) / 60000 : e.duration_min ?? 0
+    }
+    return Math.max(0, m)
   }
   function entriesFor(from: Date, to: Date, employerId: number, projectId: number | null): Entry[] {
     const fk = dayKey(startOfDay(from))
@@ -333,16 +355,11 @@ export default function Auswertung({ theme, onToggleTheme, onBack, onOpenCalenda
             <div style={{ flex: 'none', borderRadius: 28, ...GLASS, boxShadow: '0 10px 30px var(--hair)', padding: '22px 26px 14px' }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
                 <div>
-                  <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '1.4px', textTransform: 'uppercase', color: 'var(--ink3)' }}>Konto{sollMode === 'todate' ? ' · bis jetzt' : ''}</div>
-                  <div style={{ fontSize: 40, fontWeight: 800, color: 'var(--ink)', letterSpacing: '-1.5px', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>{fmtSigned(totalIst - totalSoll)}</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink2)', marginTop: 2 }}>Ist {fmtDur(totalIst)} · Soll {fmtDur(totalSoll)}</div>
+                  <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '1.4px', textTransform: 'uppercase', color: 'var(--ink3)' }}>{isPrivSel ? '% Wochenziel' : 'Saldo'}</div>
+                  <div style={{ fontSize: 40, fontWeight: 800, color: 'var(--ink)', letterSpacing: '-1.5px', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>{isPrivSel ? (periodGoal > 0 ? `${goalPctSel}%` : '—') : fmtSigned(totalIst - totalSoll)}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink2)', marginTop: 2 }}>{isPrivSel ? `Erfasst ${fmtDur(totalIst)} · Ziel ${fmtDur(periodGoal)}` : `Ist ${fmtDur(totalIst)} · Soll ${fmtDur(totalSoll)}`}</div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <div style={{ display: 'flex', padding: 3, gap: 3, borderRadius: 11, ...GLASS }}>
-                    {(['todate', 'full'] as const).map((m) => (
-                      <div key={m} onClick={() => setSollMode(m)} style={{ padding: '7px 12px', borderRadius: 9, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: sollMode === m ? 'var(--ink)' : 'var(--ink3)', background: sollMode === m ? 'var(--glass-strong)' : 'transparent', boxShadow: sollMode === m ? '0 2px 8px var(--hair)' : 'none' }}>{m === 'todate' ? 'Bis jetzt' : 'Ganze Periode'}</div>
-                    ))}
-                  </div>
                   {areaFilter === 'all' && (
                     <div onClick={() => setSplitByArea((v) => !v)} title="Balken nach Bereich aufteilen" style={{ width: 38, height: 38, borderRadius: '50%', display: 'grid', placeItems: 'center', cursor: 'pointer', color: splitByArea ? 'var(--ink)' : 'var(--ink3)', background: splitByArea ? 'var(--glass-strong)' : 'var(--glass)', border: `1px solid ${splitByArea ? 'var(--ink3)' : 'var(--border)'}` }}>
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4-4" /></svg>
@@ -357,7 +374,7 @@ export default function Auswertung({ theme, onToggleTheme, onBack, onOpenCalenda
                   const sollH = (x.soll / scaleMax) * CHART_H
                   const hovered = hoveredIdx === i
                   const segs = splitByArea && areaFilter === 'all'
-                    ? employers.map((e) => ({ color: colorFor(e.id), ist: sumRange(x.sp.from, x.sp.to, [e.id], istDayEmp) })).filter((s) => s.ist > 0)
+                    ? employers.filter((e) => e.kind === 'work').map((e) => ({ color: colorFor(e.id), ist: sumRange(x.sp.from, x.sp.to, [e.id], istDayEmp) })).filter((s) => s.ist > 0)
                     : [{ color: accent, ist: x.ist }]
                   return (
                     <div key={i} onClick={() => setSlot(x.sp)} onMouseEnter={() => setHoveredIdx(i)} onMouseLeave={() => setHoveredIdx(null)} style={{ flex: 1, height: '100%', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', position: 'relative', cursor: 'pointer' }}>
@@ -388,9 +405,9 @@ export default function Auswertung({ theme, onToggleTheme, onBack, onOpenCalenda
 
             {/* area cards */}
             <div style={{ flex: 'none', borderRadius: 24, ...GLASS, boxShadow: '0 10px 30px var(--hair)', padding: '18px 22px' }}>
-              <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '1.4px', textTransform: 'uppercase', color: 'var(--ink3)', marginBottom: 12 }}>Bereiche · {big}</div>
+              <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '1.4px', textTransform: 'uppercase', color: 'var(--ink3)', marginBottom: 12 }}>{areaFilter === 'all' ? 'Bereiche' : 'Projekte'} · {big}</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {employers.filter((e) => areaFilter === 'all' || e.id === areaFilter).map((e) => {
+                {areaFilter === 'all' ? employers.map((e) => {
                   const color = colorFor(e.id)
                   const segs = subs.map((sp) => {
                     const ist = sumRange(sp.from, sp.to, [e.id], istDayEmp)
@@ -415,7 +432,42 @@ export default function Auswertung({ theme, onToggleTheme, onBack, onOpenCalenda
                       <div style={{ width: 130, flex: 'none', textAlign: 'right', fontSize: 12, fontWeight: 700, color: 'var(--ink3)', fontVariantNumeric: 'tabular-nums' }}>{fmtDur(istT)} / {fmtDur(sollT)}</div>
                     </div>
                   )
-                })}
+                }) : (() => {
+                  const rows = projectAgg(periodFrom, periodTo, [areaFilter])
+                  if (rows.length === 0) return <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink3)', padding: '2px 0' }}>Keine Buchungen in dieser Periode.</div>
+                  return rows.map((r) => {
+                    const pkey = `${r.employerId}:${r.projectId}`
+                    const open = projChart === pkey
+                    const vals = open ? subs.map((sp) => projMinRange(sp.from, sp.to, r.employerId, r.projectId)) : []
+                    const maxV = open ? Math.max(1, ...vals) : 1
+                    return (
+                      <div key={pkey} style={{ borderRadius: 12, background: open ? 'var(--glass)' : 'transparent', border: `1px solid ${open ? 'var(--hair)' : 'transparent'}` }}>
+                        <div onClick={() => setProjChart(open ? null : pkey)} title="Verteilung über die Periode anzeigen" style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', borderRadius: 12, padding: '8px 10px' }}>
+                          <div style={{ width: 9, height: 9, borderRadius: 3, background: r.color, flex: 'none' }} />
+                          <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 800, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name}</div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink2)', fontVariantNumeric: 'tabular-nums' }}>{fmtDur(r.min)}</div>
+                          <div style={{ color: 'var(--ink3)', fontSize: 15, fontWeight: 800, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>›</div>
+                        </div>
+                        {open && (
+                          <div style={{ padding: '4px 12px 12px' }}>
+                            <div style={{ display: 'flex', alignItems: 'flex-end', gap: subs.length > 12 ? 3 : 6, height: 84 }}>
+                              {vals.map((v, i) => (
+                                <div key={i} title={`${subs[i].label}: ${fmtDur(v)}`} style={{ flex: 1, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', height: '100%' }}>
+                                  <div style={{ width: '78%', minWidth: 4, height: `${Math.max(2, (v / maxV) * 78)}px`, background: v > 0 ? r.color : 'var(--track)', borderRadius: 4 }} />
+                                </div>
+                              ))}
+                            </div>
+                            <div style={{ display: 'flex', gap: subs.length > 12 ? 3 : 6, marginTop: 5 }}>
+                              {subs.map((sp, i) => (
+                                <div key={i} style={{ flex: 1, textAlign: 'center', fontSize: subs.length > 12 ? 9 : 10, fontWeight: 700, color: 'var(--ink3)', whiteSpace: 'nowrap', overflow: 'hidden' }}>{sp.label}</div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })
+                })()}
               </div>
             </div>
           </div>
@@ -442,7 +494,7 @@ export default function Auswertung({ theme, onToggleTheme, onBack, onOpenCalenda
                       <div style={{ flex: 1, borderRadius: 14, ...GLASS, padding: '11px 14px' }}><div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--ink3)' }}>Soll</div><div style={{ fontSize: 22, fontWeight: 800, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{fmtDur(soll)}</div></div>
                     </div>
                     <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 9 }}>
-                      {employers.filter((e) => areaFilter === 'all' || e.id === areaFilter).map((e) => (
+                      {employers.filter((e) => (areaFilter === 'all' ? e.kind === 'work' : e.id === areaFilter)).map((e) => (
                         <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                           <div style={{ width: 9, height: 9, borderRadius: 3, background: colorFor(e.id) }} />
                           <div style={{ flex: 1, fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>{e.name}</div>

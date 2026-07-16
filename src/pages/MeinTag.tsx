@@ -294,7 +294,7 @@ function HeroTile({
       <div>
         <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--ink)', letterSpacing: '-0.4px' }}>Mein Tag</div>
         <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink2)', marginTop: 2 }}>
-          {view === 0 ? '24-Stunden-Uhr · Soll & Ist' : view === 1 ? 'Timeline · Plan vs Ist · zum Kalender' : 'To-Dos · offen · zur Liste'}
+          {view === 0 ? '24-Stunden-Uhr · Soll & Ist' : view === 1 ? 'Timeline · Plan & Ist' : 'To-Dos'}
         </div>
       </div>
 
@@ -1688,6 +1688,9 @@ export default function MeinTag({ theme, onToggleTheme, onOpenTodos, onOpenCalen
           const totalIst = istByEmployer.get(emp.id) ?? 0
           const absMin = Math.max(0, totalIst - bookedSum)
           const geplant = sollDayMin(emp.id)
+          const isPriv = emp.kind === 'private'
+          const goal = emp.weekly_goal_min
+          const goalPct = goal > 0 ? Math.round((totalIst / goal) * 100) : 0
           return (
             <div onClick={() => setAreaPopup(null)} style={{ position: 'absolute', inset: 0, zIndex: 80, background: 'var(--veil)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 34 }}>
               <div onClick={(ev) => ev.stopPropagation()} style={{ width: 380, maxHeight: '86%', display: 'flex', flexDirection: 'column', borderRadius: 24, background: 'var(--screen)', border: '1px solid var(--border)', boxShadow: 'var(--shadow)', overflow: 'hidden', animation: 'popIn .16s ease' }}>
@@ -1705,8 +1708,8 @@ export default function MeinTag({ theme, onToggleTheme, onOpenTodos, onOpenCalen
                       <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--ink)', letterSpacing: '-0.5px', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>{fmtDur(totalIst)}</div>
                     </div>
                     <div style={{ flex: 1, borderRadius: 16, ...GLASS, padding: '12px 14px' }}>
-                      <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--ink3)' }}>Geplant</div>
-                      <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--ink3)', letterSpacing: '-0.5px', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>{geplant > 0 ? fmtDur(geplant) : '—'}</div>
+                      <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--ink3)' }}>{isPriv ? '% Wochenziel' : 'Geplant'}</div>
+                      <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--ink3)', letterSpacing: '-0.5px', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>{isPriv ? (goal > 0 ? `${goalPct}%` : '—') : geplant > 0 ? fmtDur(geplant) : '—'}</div>
                     </div>
                   </div>
                   <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--ink3)', margin: '18px 0 10px' }}>Projekte</div>

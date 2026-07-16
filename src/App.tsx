@@ -17,7 +17,7 @@ const LEVELS: Level[] = ['tag', 'week', 'month', 'year', 'gesamt']
 
 // Seiten-interne Aktionen, die per Command ausgelöst werden. `nonce` erzwingt,
 // dass ein wiederholtes Auslösen derselben Aktion erneut greift.
-export type PageIntent = { action: 'new-entry' | 'toggle-tracking' | 'new-todo' | 'new-absence' | 'period-prev' | 'period-next' | 'planner-toggle' | 'plan-split' | 'level-up' | 'level-down' | 'filter-toggle' | 'export-open'; nonce: number }
+export type PageIntent = { action: 'new-entry' | 'toggle-tracking' | 'new-todo' | 'new-absence' | 'period-prev' | 'period-next' | 'planner-toggle' | 'plan-split' | 'level-up' | 'level-down' | 'filter-toggle' | 'export-open' | 'list-view'; nonce: number }
 
 const DEFAULT_SETTINGS: AppSettings = {
   accent_color: '#22C55E',
@@ -166,6 +166,10 @@ export default function App() {
       case 'export-open':
         setView('calendar')
         setIntent({ action: 'export-open', nonce: Date.now() })
+        break
+      case 'list-view':
+        setView('calendar')
+        setIntent({ action: 'list-view', nonce: Date.now() })
         break
     }
   }

@@ -274,7 +274,7 @@ interface CalendarProps {
 }
 
 export default function Calendar({ theme, onToggleTheme, onBack, onOpenTodos, onOpenSpotlight, settings, selectedDay, setSelectedDay, intent, onIntentDone }: CalendarProps) {
-  const [calView, setCalView] = useState<'week' | 'month' | 'year' | 'planner'>('week')
+  const [calView, setCalView] = useState<'week' | 'month' | 'year' | 'planner' | 'list'>('week')
   const [splitPlan, setSplitPlan] = useState(false) // Wochenansicht: Ist links, Plan rechts (kompletter Plan)
 
   // Command-Intents: Periode vor/zurück, Plan (Standardwoche) an/aus.
@@ -296,6 +296,7 @@ export default function Calendar({ theme, onToggleTheme, onBack, onOpenTodos, on
     } else if (intent.action === 'new-absence') openAbsSheet()
     else if (intent.action === 'filter-toggle') setFilterOpen((o) => !o)
     else if (intent.action === 'export-open') openExport()
+    else if (intent.action === 'list-view') setCalView((v) => (v === 'list' ? 'week' : 'list'))
     onIntentDone()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intent])
@@ -1103,6 +1104,53 @@ export default function Calendar({ theme, onToggleTheme, onBack, onOpenTodos, on
     )
   }
 
+  // Listenansicht: alle gefilterten Buchungen nach Tag (neueste zuerst); bei aktivem Plan
+  // erscheinen die geplanten Aktivitäten mit, klar als „Plan" markiert.
+  function listBody() {
+    const days = new Map<string, Entry[]>()
+    for (const e of entries) {
+      if (!visible(e.employer_id, e.project_id)) continue
+      const k = dayKey(new Date(e.start_ts))
+      const arr = days.get(k) ?? []
+      arr.push(e)
+      days.set(k, arr)
+    }
+    const keys = [...days.keys()].sort((a, b) => (a < b ? 1 : -1))
+    return (
+      <div className="no-scrollbar" style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: 4 }}>
+        {keys.length === 0 && <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink3)', padding: '8px 2px' }}>Keine Buchungen.</div>}
+        {keys.map((k) => {
+          const d = new Date(`${k}T00:00:00`)
+          const isTod = k === dayKey(now)
+          type Row = { kind: 'ist' | 'plan'; s: number; e: number; color: string; name: string; note: string | null; entry: Entry | null }
+          const ist: Row[] = (days.get(k) ?? []).map((e) => ({ kind: 'ist', s: minutesOfDay(new Date(e.start_ts)), e: e.end_ts ? minutesOfDay(new Date(e.end_ts)) : isTod ? nowMin : minutesOfDay(new Date(e.start_ts)), color: colorFor(e.employer_id), name: labelEntry(e), note: e.note, entry: e }))
+          const plan: Row[] = splitPlan ? resolveDayPlan(d).map((b) => ({ kind: 'plan', s: b.start_min, e: b.end_min, color: colorFor(b.employer_id), name: planLabel(b), note: null, entry: null })) : []
+          const rows = [...ist, ...plan].sort((a, b) => a.s - b.s)
+          return (
+            <div key={k} style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase', color: isTod ? 'var(--accent, #16A34A)' : 'var(--ink3)', marginBottom: 8 }}>{WD[monIndex(d)]} · {d.getDate()}. {MONTHS[d.getMonth()]} {d.getFullYear()}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {rows.map((it, i) => {
+                  const isPlan = it.kind === 'plan'
+                  return (
+                    <div key={i} onClick={it.entry ? () => setEntryPopup(it.entry) : undefined} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 14, background: 'var(--glass)', border: isPlan ? `1.5px dashed ${it.color}` : '1px solid var(--border)', cursor: it.entry ? 'pointer' : 'default' }}>
+                      <div style={{ width: 88, flex: 'none', fontSize: 13, fontWeight: 800, color: 'var(--ink2)', fontVariantNumeric: 'tabular-nums' }}>{minToHHMM(it.s)}–{minToHHMM(it.e)}</div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.name}</div>
+                        {it.note && <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.note}</div>}
+                      </div>
+                      <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', padding: '3px 9px', borderRadius: 7, flex: 'none', color: isPlan ? it.color : '#fff', background: isPlan ? `color-mix(in srgb, ${it.color} 16%, transparent)` : it.color, border: isPlan ? `1px solid ${it.color}` : 'none' }}>{isPlan ? 'Plan' : 'Ist'}</div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
   return (
     <div data-theme={theme} style={{ fontFamily: "-apple-system, system-ui, 'Manrope', sans-serif", height: '100vh', width: '100vw', overflow: 'hidden' }}>
       <div style={{ zoom: ZOOM, width: 'calc(100vw / 0.9)', height: 'calc(100vh / 0.9)', background: 'var(--screen)', overflow: 'hidden', position: 'relative', padding: '44px 68px', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
@@ -1110,29 +1158,17 @@ export default function Calendar({ theme, onToggleTheme, onBack, onOpenTodos, on
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16, minHeight: 45 }}>
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10 }}>
             <div onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 15px', borderRadius: 14, ...GLASS, cursor: 'pointer', fontSize: 14, fontWeight: 800, color: 'var(--ink2)' }}>‹ Tag</div>
-            <div onClick={() => setCalView((v) => (v === 'planner' ? 'week' : 'planner'))} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 16px', borderRadius: 14, cursor: 'pointer', fontSize: 14, fontWeight: 800, background: isPlanner ? 'color-mix(in srgb, var(--accent, #22C55E) 14%, transparent)' : 'var(--glass)', border: `1.5px solid ${isPlanner ? 'var(--accent, #22C55E)' : 'var(--border)'}`, color: isPlanner ? 'var(--accent, #16A34A)' : 'var(--ink2)' }}>✦ Planner</div>
-            <div onClick={openAbsSheet} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 16px', borderRadius: 14, cursor: 'pointer', fontSize: 14, fontWeight: 800, background: 'var(--glass)', border: '1px solid var(--border)', color: 'var(--ink2)' }}>⊘ Abwesenheit</div>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flex: 'none' }}>
-            {!isPlanner && <div onClick={calPrev} style={{ width: 34, height: 34, borderRadius: 11, ...GLASS, display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--ink2)', fontSize: 18, fontWeight: 700 }}>‹</div>}
-            <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--ink)', letterSpacing: '-0.4px', minWidth: 230, textAlign: 'center' }}>{periodTitle}</div>
-            {!isPlanner && <div onClick={calNext} style={{ width: 34, height: 34, borderRadius: 11, ...GLASS, display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--ink2)', fontSize: 18, fontWeight: 700 }}>›</div>}
-          </div>
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'flex-end' }}>
-            {showToday && !isPlanner && (
-              <div onClick={() => setSelectedDay(startOfDay(new Date()))} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 11, background: 'color-mix(in srgb, var(--accent, #22C55E) 14%, transparent)', border: '1.5px solid var(--accent, #22C55E)', cursor: 'pointer', fontSize: 13, fontWeight: 800, color: 'var(--accent, #16A34A)', whiteSpace: 'nowrap' }}>↩ Heute</div>
-            )}
-            {!isPlanner && (
-              <div style={{ display: 'flex', padding: 4, gap: 3, borderRadius: 14, ...GLASS }}>
-                {(['week', 'month', 'year'] as const).map((v) => (
-                  <div key={v} onClick={() => setCalView(v)} style={{ padding: '8px 16px', borderRadius: 10, fontSize: 13, fontWeight: 800, cursor: 'pointer', color: calView === v ? 'var(--ink)' : 'var(--ink3)', background: calView === v ? 'var(--glass-strong)' : 'transparent', boxShadow: calView === v ? '0 2px 8px var(--hair)' : 'none' }}>
-                    {v === 'week' ? 'Woche' : v === 'month' ? 'Monat' : 'Jahr'}
-                  </div>
-                ))}
-              </div>
-            )}
-            {!isPlanner && calView === 'week' && (
-              <div onClick={() => setSplitPlan((s) => !s)} title="Ist & Plan getrennt anzeigen (Ist links, Plan rechts)" style={{ width: 40, height: 40, borderRadius: '50%', ...GLASS, display: 'grid', placeItems: 'center', cursor: 'pointer', ...(splitPlan ? { background: 'color-mix(in srgb, var(--accent, #22C55E) 16%, transparent)', border: '1.5px solid var(--accent, #22C55E)', color: 'var(--accent, #16A34A)' } : { color: 'var(--ink2)' }) }}>
+            <div onClick={() => setCalView((v) => (v === 'planner' ? 'week' : 'planner'))} title="Planner (Standardwoche)" style={{ width: 40, height: 40, borderRadius: '50%', ...GLASS, display: 'grid', placeItems: 'center', cursor: 'pointer', ...(isPlanner ? { background: 'color-mix(in srgb, var(--accent, #22C55E) 16%, transparent)', border: '1.5px solid var(--accent, #22C55E)', color: 'var(--accent, #16A34A)' } : { color: 'var(--ink2)' }) }}>
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l2.3 5.6 6 .5-4.6 3.9 1.5 5.9L12 17.8 6.8 18.9l1.5-5.9L3.7 9.1l6-.5z" /></svg>
+            </div>
+            <div onClick={openAbsSheet} title="Abwesenheit anlegen" style={{ width: 40, height: 40, borderRadius: '50%', ...GLASS, display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--ink2)' }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="8.5" /><path d="M6 6l12 12" /></svg>
+            </div>
+            <div onClick={() => setCalView((v) => (v === 'list' ? 'week' : 'list'))} title="Listenansicht aller Buchungen" style={{ width: 40, height: 40, borderRadius: '50%', ...GLASS, display: 'grid', placeItems: 'center', cursor: 'pointer', ...(calView === 'list' ? { background: 'color-mix(in srgb, var(--accent, #22C55E) 16%, transparent)', border: '1.5px solid var(--accent, #22C55E)', color: 'var(--accent, #16A34A)' } : { color: 'var(--ink2)' }) }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6h11" /><path d="M9 12h11" /><path d="M9 18h11" /><circle cx="4.5" cy="6" r="1.2" /><circle cx="4.5" cy="12" r="1.2" /><circle cx="4.5" cy="18" r="1.2" /></svg>
+            </div>
+            {!isPlanner && (calView === 'week' || calView === 'list') && (
+              <div onClick={() => setSplitPlan((s) => !s)} title={calView === 'list' ? 'Geplante Aktivitäten in der Liste anzeigen' : 'Ist & Plan getrennt (Ist links, Plan rechts)'} style={{ width: 40, height: 40, borderRadius: '50%', ...GLASS, display: 'grid', placeItems: 'center', cursor: 'pointer', ...(splitPlan ? { background: 'color-mix(in srgb, var(--accent, #22C55E) 16%, transparent)', border: '1.5px solid var(--accent, #22C55E)', color: 'var(--accent, #16A34A)' } : { color: 'var(--ink2)' }) }}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" /><path d="M12 4.5v15" /></svg>
               </div>
             )}
@@ -1143,7 +1179,7 @@ export default function Calendar({ theme, onToggleTheme, onBack, onOpenTodos, on
               {filterOpen && (
                 <>
                   <div onClick={() => setFilterOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 54 }} />
-                  <div style={{ position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 55, width: 280, maxHeight: 380, overflowY: 'auto', borderRadius: 20, background: 'var(--screen)', border: '1px solid var(--border)', boxShadow: 'var(--shadow)', padding: 14, boxSizing: 'border-box' }}>
+                  <div style={{ position: 'absolute', top: 'calc(100% + 8px)', left: 0, zIndex: 55, width: 280, maxHeight: 380, overflowY: 'auto', borderRadius: 20, background: 'var(--screen)', border: '1px solid var(--border)', boxShadow: 'var(--shadow)', padding: 14, boxSizing: 'border-box' }}>
                     <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--ink3)', marginBottom: 10 }}>Bereiche &amp; Projekte</div>
                     {employers.map((e) => {
                       const areaOn = !hiddenAreas.has(e.id)
@@ -1172,6 +1208,25 @@ export default function Calendar({ theme, onToggleTheme, onBack, onOpenTodos, on
                 </>
               )}
             </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flex: 'none' }}>
+            {!isPlanner && calView !== 'list' && <div onClick={calPrev} style={{ width: 34, height: 34, borderRadius: 11, ...GLASS, display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--ink2)', fontSize: 18, fontWeight: 700 }}>‹</div>}
+            <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--ink)', letterSpacing: '-0.4px', minWidth: 230, textAlign: 'center' }}>{calView === 'list' ? 'Alle Buchungen' : periodTitle}</div>
+            {!isPlanner && calView !== 'list' && <div onClick={calNext} style={{ width: 34, height: 34, borderRadius: 11, ...GLASS, display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--ink2)', fontSize: 18, fontWeight: 700 }}>›</div>}
+          </div>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'flex-end' }}>
+            {showToday && !isPlanner && calView !== 'list' && (
+              <div onClick={() => setSelectedDay(startOfDay(new Date()))} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 11, background: 'color-mix(in srgb, var(--accent, #22C55E) 14%, transparent)', border: '1.5px solid var(--accent, #22C55E)', cursor: 'pointer', fontSize: 13, fontWeight: 800, color: 'var(--accent, #16A34A)', whiteSpace: 'nowrap' }}>↩ Heute</div>
+            )}
+            {!isPlanner && (
+              <div style={{ display: 'flex', padding: 4, gap: 3, borderRadius: 14, ...GLASS }}>
+                {(['week', 'month', 'year'] as const).map((v) => (
+                  <div key={v} onClick={() => setCalView(v)} style={{ padding: '8px 16px', borderRadius: 10, fontSize: 13, fontWeight: 800, cursor: 'pointer', color: calView === v ? 'var(--ink)' : 'var(--ink3)', background: calView === v ? 'var(--glass-strong)' : 'transparent', boxShadow: calView === v ? '0 2px 8px var(--hair)' : 'none' }}>
+                    {v === 'week' ? 'Woche' : v === 'month' ? 'Monat' : 'Jahr'}
+                  </div>
+                ))}
+              </div>
+            )}
             <div onClick={openExport} title="Exportieren (CSV)" style={{ width: 40, height: 40, borderRadius: '50%', ...GLASS, display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--ink2)' }}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12" /><path d="M7 9l5-6 5 6" /><path d="M4 17v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" /></svg>
             </div>
@@ -1204,6 +1259,8 @@ export default function Calendar({ theme, onToggleTheme, onBack, onOpenTodos, on
           <div style={{ color: '#E5484D', fontWeight: 700, padding: 12 }}>{loadError}</div>
         ) : isPlanner ? (
           plannerBody()
+        ) : calView === 'list' ? (
+          listBody()
         ) : (
           <div ref={pagerRef} onPointerDown={pagerDown} onWheel={pagerWheel} style={{ flex: 1, minHeight: 0, overflow: 'hidden', position: 'relative', userSelect: 'none', WebkitUserSelect: 'none' }}>
             <div style={{ display: 'flex', width: '300%', height: '100%', transform: `translateX(calc(-33.3333% + ${dx}px))`, transition: animating ? 'transform .32s cubic-bezier(.22,.61,.36,1)' : 'none' }}>

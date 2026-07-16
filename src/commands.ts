@@ -14,6 +14,7 @@ export type CommandId =
   | 'open-spotlight'
   | 'filter-toggle'
   | 'export-open'
+  | 'list-view'
   | 'new-entry'
   | 'toggle-tracking'
   | 'new-todo'
@@ -42,6 +43,7 @@ export const COMMANDS: CommandDef[] = [
   { id: 'toggle-theme', label: 'Farbschema wechseln', group: 'Ansicht', icon: '🌓' },
   { id: 'filter-toggle', label: 'Filter (Kalender)', group: 'Ansicht', icon: '🎚️' },
   { id: 'export-open', label: 'Export (Kalender)', group: 'Ansicht', icon: '📤' },
+  { id: 'list-view', label: 'Listenansicht (Kalender)', group: 'Ansicht', icon: '🗒️' },
   { id: 'new-entry', label: 'Neue Aktivität', group: 'Aktionen', icon: '➕' },
   { id: 'toggle-tracking', label: 'Tracking Start/Stopp', group: 'Aktionen', icon: '⏱️' },
   { id: 'new-todo', label: 'Neues To-Do', group: 'Aktionen', icon: '📝' },
@@ -76,6 +78,7 @@ export const DEFAULT_HOTKEYS: Record<CommandId, string> = {
   'new-absence': 'mod+shift+a',
   'filter-toggle': 'mod+shift+f',
   'export-open': 'mod+shift+x',
+  'list-view': 'mod+shift+l',
   'period-prev': 'mod+shift+left',
   'period-next': 'mod+shift+right',
   'level-up': 'mod+shift+up',
