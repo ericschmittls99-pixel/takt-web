@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState, type CSSProperties, type Dispatch, type SetStateAction } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type SetStateAction } from 'react'
 import { api, type Absence, type AppSettings, type AreaHours, type Employer, type Entry, type Project } from '../api'
 import { employerColor } from '../colors'
 import { holidayName } from '../holidays'
 import { distributeAbsenceMinutes } from '../absence'
 import EntryEditor from '../components/EntryEditor'
+import type { PageIntent } from '../App'
 
 const GLASS: CSSProperties = {
   background: 'var(--glass)',
@@ -68,10 +69,13 @@ interface AuswertungProps {
   onOpenSpotlight: () => void
   settings: AppSettings
   setSelectedDay: Dispatch<SetStateAction<Date>>
+  mode: Mode
+  onModeChange: (m: Mode) => void
+  intent: PageIntent | null
+  onIntentDone: () => void
 }
 
-export default function Auswertung({ theme, onToggleTheme, onBack, onOpenCalendar, onOpenTodos, onOpenSpotlight, settings, setSelectedDay }: AuswertungProps) {
-  const [mode, setMode] = useState<Mode>('week')
+export default function Auswertung({ theme, onToggleTheme, onBack, onOpenCalendar, onOpenTodos, onOpenSpotlight, settings, setSelectedDay, mode, onModeChange, intent, onIntentDone }: AuswertungProps) {
   const [ref, setRef] = useState(() => startOfDay(new Date()))
   const [areaFilter, setAreaFilter] = useState<number | 'all'>('all')
   const [employers, setEmployers] = useState<Employer[]>([])
@@ -107,9 +111,24 @@ export default function Auswertung({ theme, onToggleTheme, onBack, onOpenCalenda
     setEntries(await api.getEntries())
   }
 
+  // Perioden-Navigation per Command (period-prev/next).
+  const lastIntentNonce = useRef(0)
+  useEffect(() => {
+    if (!intent || intent.nonce === lastIntentNonce.current) return
+    lastIntentNonce.current = intent.nonce
+    if (intent.action === 'period-prev') navPeriod(-1)
+    else if (intent.action === 'period-next') navPeriod(1)
+    onIntentDone()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [intent])
+
   const todayKey = dayKey(startOfDay(now))
   const nowMin = now.getHours() * 60 + now.getMinutes()
   const includedEmp = areaFilter === 'all' ? employers.map((e) => e.id) : [areaFilter]
+
+  const employersById = useMemo(() => new Map(employers.map((e) => [e.id, e])), [employers])
+  const colorFor = (empId: number): string => employersById.get(empId)?.color ?? employerColor(empId)
+  const projectsById = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects])
 
   // Ist-Minuten je Tag+Bereich aus Zeiteinträgen.
   const entryMin = useMemo(() => {
@@ -125,6 +144,7 @@ export default function Auswertung({ theme, onToggleTheme, onBack, onOpenCalenda
   }, [entries, now])
 
   function dailySoll(empId: number, key: string): number {
+    if (key < settings.start_date) return 0 // harter Stichtag: davor kein Soll
     const emp = employersById.get(empId)
     if (emp && emp.kind === 'private') return 0
     if (holidayName(key, settings.bundesland)) return 0
@@ -145,6 +165,7 @@ export default function Auswertung({ theme, onToggleTheme, onBack, onOpenCalenda
     return total
   }
   function istDayEmp(key: string, empId: number): number {
+    if (key < settings.start_date) return 0 // harter Stichtag: davor kein Ist
     return (entryMin.get(key)?.get(empId) ?? 0) + absenceIstDay(key, empId)
   }
   // Soll je Tag – im "bis jetzt"-Modus zählen künftige Tage nicht.
@@ -163,10 +184,11 @@ export default function Auswertung({ theme, onToggleTheme, onBack, onOpenCalenda
   const month = ref.getMonth()
   const weekStart = useMemo(() => addDays(startOfDay(ref), -monIndex(ref)), [ref])
   const earliestYear = useMemo(() => {
+    const startYear = new Date(`${settings.start_date}T00:00:00`).getFullYear()
     let y = now.getFullYear()
     for (const e of entries) y = Math.min(y, new Date(e.start_ts).getFullYear())
-    return y
-  }, [entries, now])
+    return Math.max(y, startYear) // "Gesamt" beginnt frühestens im Stichtags-Jahr
+  }, [entries, now, settings.start_date])
 
   const { subs, periodFrom, periodTo, kicker, big } = useMemo(() => {
     if (mode === 'week') {
@@ -199,16 +221,13 @@ export default function Auswertung({ theme, onToggleTheme, onBack, onOpenCalenda
   const subData = useMemo(
     () => subs.map((sp) => ({ sp, ist: sumRange(sp.from, sp.to, includedEmp, istDayEmp), soll: sumRange(sp.from, sp.to, includedEmp, sollDayFn) })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [subs, includedEmp, entryMin, absences, areaHours, sollMode, todayKey],
+    [subs, includedEmp, entryMin, absences, areaHours, sollMode, todayKey, settings.start_date],
   )
   const totalIst = subData.reduce((s, x) => s + x.ist, 0)
   const totalSoll = subData.reduce((s, x) => s + x.soll, 0)
   const scaleMax = Math.max(1, ...subData.map((x) => Math.max(x.ist, x.soll)))
 
   const accent = areaFilter === 'all' ? 'var(--accent, #22C55E)' : employerColor(areaFilter)
-  const employersById = useMemo(() => new Map(employers.map((e) => [e.id, e])), [employers])
-  const colorFor = (empId: number): string => employersById.get(empId)?.color ?? employerColor(empId)
-  const projectsById = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects])
 
   // Projekte (mit Ist-Minuten) im Zeitraum für die Bereiche.
   function projectAgg(from: Date, to: Date, empIds: number[]) {
@@ -263,7 +282,7 @@ export default function Auswertung({ theme, onToggleTheme, onBack, onOpenCalenda
             </div>
             <div style={{ display: 'flex', padding: 4, gap: 3, borderRadius: 14, ...GLASS }}>
               {(['week', 'month', 'year', 'gesamt'] as const).map((m) => (
-                <div key={m} onClick={() => setMode(m)} style={{ padding: '8px 14px', borderRadius: 10, fontSize: 13, fontWeight: 800, cursor: 'pointer', color: mode === m ? 'var(--ink)' : 'var(--ink3)', background: mode === m ? 'var(--glass-strong)' : 'transparent', boxShadow: mode === m ? '0 2px 8px var(--hair)' : 'none' }}>
+                <div key={m} onClick={() => onModeChange(m)} style={{ padding: '8px 14px', borderRadius: 10, fontSize: 13, fontWeight: 800, cursor: 'pointer', color: mode === m ? 'var(--ink)' : 'var(--ink3)', background: mode === m ? 'var(--glass-strong)' : 'transparent', boxShadow: mode === m ? '0 2px 8px var(--hair)' : 'none' }}>
                   {m === 'week' ? 'Woche' : m === 'month' ? 'Monat' : m === 'year' ? 'Jahr' : 'Gesamt'}
                 </div>
               ))}

@@ -5,6 +5,7 @@ import { holidayName } from '../holidays'
 import { distributeAbsenceMinutes } from '../absence'
 import { parseQuickTodo } from '../todoParse'
 import EntryEditor from '../components/EntryEditor'
+import TimeField from '../components/TimeField'
 import type { PageIntent } from '../App'
 
 const ABS_COLOR: Record<AbsenceType, string> = { urlaub: '#F59E0B', krank: '#E5484D', sonstiges: '#5B6577' }
@@ -205,7 +206,8 @@ function HeroTile({
   isToday,
   nowMin,
   onOpenCalendar,
-  onEditEntry,
+  onOpenEntry,
+  onOpenPlan,
   todos,
   onOpenTodos,
   onAddTodo,
@@ -219,7 +221,8 @@ function HeroTile({
   isToday: boolean
   nowMin: number
   onOpenCalendar: () => void
-  onEditEntry: (id: number) => void
+  onOpenEntry: (id: number) => void
+  onOpenPlan: (b: TlPlanned) => void
   todos: HeroTodo[]
   onOpenTodos: () => void
   onAddTodo: (title: string) => Promise<void>
@@ -256,6 +259,11 @@ function HeroTile({
     const startY = e.clientY
     suppressRef.current = false
     const width = e.currentTarget.getBoundingClientRect().width
+    // Während der Swipe-Geste global keine Textmarkierung – auch wenn der Zeiger
+    // über andere Widgets hinausläuft (selectstart unterdrücken ist zuverlässiger als user-select).
+    document.body.style.userSelect = 'none'
+    const noSelect = (ev: Event) => ev.preventDefault()
+    document.addEventListener('selectstart', noSelect)
     const move = (ev: PointerEvent) => {
       const dx = ev.clientX - startX
       setDragDx(dx)
@@ -264,6 +272,9 @@ function HeroTile({
     const up = (ev: PointerEvent) => {
       document.removeEventListener('pointermove', move)
       document.removeEventListener('pointerup', up)
+      document.removeEventListener('selectstart', noSelect)
+      document.body.style.userSelect = ''
+      if (suppressRef.current) window.getSelection?.()?.removeAllRanges()
       const dx = ev.clientX - startX
       setDragDx(0)
       const th = Math.min(70, width * 0.2)
@@ -327,7 +338,7 @@ function HeroTile({
                 {plannedBlocks.map((b) => {
                   const h = Math.max(14, ((b.end_min - b.start_min) / 60) * HOUR_H - 2)
                   return (
-                    <div key={`p${b.id}`} title={b.label} style={{ position: 'absolute', left: 44, width: 'calc(50% - 52px)', top: (b.start_min / 60) * HOUR_H, height: h, borderRadius: 8, background: `color-mix(in srgb, ${b.color} 22%, transparent)`, border: `1.5px solid ${b.color}`, boxSizing: 'border-box', padding: '2px 6px', overflow: 'hidden' }}>
+                    <div key={`p${b.id}`} title={`${b.label} – geplant`} onClick={(ev) => { ev.stopPropagation(); onOpenPlan(b) }} onPointerDown={(ev) => ev.stopPropagation()} style={{ position: 'absolute', left: 44, width: 'calc(50% - 52px)', top: (b.start_min / 60) * HOUR_H, height: h, borderRadius: 8, background: `color-mix(in srgb, ${b.color} 22%, transparent)`, border: `1.5px solid ${b.color}`, boxSizing: 'border-box', padding: '2px 6px', overflow: 'hidden', cursor: 'pointer' }}>
                       {h >= 22 && <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.label}</div>}
                       {h >= 40 && <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--ink2)', fontVariantNumeric: 'tabular-nums' }}>{hm(b.start_min)}–{hm(b.end_min)}</div>}
                     </div>
@@ -336,7 +347,7 @@ function HeroTile({
                 {trackedBlocks.map((b) => {
                   const h = Math.max(14, ((b.e - b.s) / 60) * HOUR_H - 2)
                   return (
-                    <div key={`t${b.id}`} title={`${b.name} – zum Bearbeiten klicken`} onClick={(ev) => { ev.stopPropagation(); onEditEntry(b.id) }} onPointerDown={(ev) => ev.stopPropagation()} style={{ position: 'absolute', left: 'calc(50% + 8px)', width: 'calc(50% - 44px)', top: (b.s / 60) * HOUR_H, height: h, borderRadius: 8, background: b.color, boxShadow: '0 3px 10px var(--hair)', boxSizing: 'border-box', padding: '2px 6px', overflow: 'hidden', cursor: 'pointer' }}>
+                    <div key={`t${b.id}`} title={`${b.name} – Details`} onClick={(ev) => { ev.stopPropagation(); onOpenEntry(b.id) }} onPointerDown={(ev) => ev.stopPropagation()} style={{ position: 'absolute', left: 'calc(50% + 8px)', width: 'calc(50% - 44px)', top: (b.s / 60) * HOUR_H, height: h, borderRadius: 8, background: b.color, boxShadow: '0 3px 10px var(--hair)', boxSizing: 'border-box', padding: '2px 6px', overflow: 'hidden', cursor: 'pointer' }}>
                       {h >= 22 && <div style={{ fontSize: 10, fontWeight: 800, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.name}</div>}
                       {h >= 40 && <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.85)', fontVariantNumeric: 'tabular-nums' }}>{hm(b.s)}–{hm(b.e)}</div>}
                     </div>
@@ -433,6 +444,7 @@ interface KontoDaySeg {
   color: string
   bookedMin: number
   sollMin: number
+  isTod: boolean
 }
 
 interface KontoPage {
@@ -553,7 +565,7 @@ function WeekKonto({
                       <div style={{ height: 10, borderRadius: 4, background: 'var(--track)', position: 'relative', overflow: 'hidden' }}>
                         <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${s.fillPct}%`, background: s.color, borderRadius: 4, transition: 'width .4s ease' }} />
                       </div>
-                      <div style={{ textAlign: 'center', fontSize: 10, fontWeight: 700, color: 'var(--ink3)', marginTop: 6 }}>{s.label}</div>
+                      <div style={{ textAlign: 'center', fontSize: 10, fontWeight: s.isTod ? 800 : 700, color: s.isTod ? 'var(--accent, #16A34A)' : 'var(--ink3)', marginTop: 6 }}>{s.label}</div>
                     </div>
                   ))}
                 </div>
@@ -729,8 +741,8 @@ function AddModal({ employers, projects, selectedDay, onClose, onCreated }: AddM
         {/* Start / Ende (nur Erfassen) */}
         {mode === 'log' && (
           <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
-            <div style={{ flex: 1 }}><div style={label}>Start</div><input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} style={timeField} /></div>
-            <div style={{ flex: 1 }}><div style={label}>Ende</div><input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} style={timeField} /></div>
+            <div style={{ flex: 1 }}><div style={label}>Start</div><TimeField value={startTime} onChange={setStartTime} style={timeField} /></div>
+            <div style={{ flex: 1 }}><div style={label}>Ende</div><TimeField value={endTime} onChange={setEndTime} style={timeField} /></div>
           </div>
         )}
 
@@ -784,6 +796,8 @@ export default function MeinTag({ theme, onToggleTheme, onOpenTodos, onOpenCalen
   const [addOpen, setAddOpen] = useState(false)
   const [editEntry, setEditEntry] = useState<Entry | null>(null)
   const [segPopup, setSegPopup] = useState<SegPopup | null>(null)
+  const [areaPopup, setAreaPopup] = useState<number | null>(null) // Bereichs-Detail (employer_id)
+  const [areaProjOpen, setAreaProjOpen] = useState<string | null>(null) // aufgeklappte Projektzeile im Bereichs-Popup
   const [livePopoverOpen, setLivePopoverOpen] = useState(false)
   const [weekPopupPage, setWeekPopupPage] = useState<number | null>(null)
   const [actFilter, setActFilter] = useState<'all' | 'work' | 'private'>('all')
@@ -848,6 +862,7 @@ export default function MeinTag({ theme, onToggleTheme, onOpenTodos, onOpenCalen
   // Tages-Soll (Minuten) eines Arbeitsbereichs an einem Datum. Private Bereiche haben
   // kein Tages-Soll (Wochenziel). An Feiertagen (Bundesland): 0.
   function dailySoll(empId: number, key: string): number {
+    if (key < settings.start_date) return 0 // harter Stichtag: davor zählt nichts in den Saldo
     const emp = employersById.get(empId)
     if (emp && emp.kind === 'private') return 0
     if (holidayName(key, settings.bundesland)) return 0
@@ -1063,12 +1078,28 @@ export default function MeinTag({ theme, onToggleTheme, onOpenTodos, onOpenCalen
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dayEntries, now, selectedDay, employers, absences, areaHours])
 
+  // Erfasste Minuten je Bereich in der Woche (Mo–So) des gewählten Tags – für das
+  // Wochenziel privater Bereiche.
+  const weekIstByEmployer = useMemo(() => {
+    const m = new Map<number, number>()
+    const mon = addDays(startOfDay(selectedDay), -((selectedDay.getDay() + 6) % 7))
+    const monK = dayKey(mon)
+    const sunK = dayKey(addDays(mon, 6))
+    for (const e of entries) {
+      const k = dayKey(new Date(e.start_ts))
+      if (k < monK || k > sunK) continue
+      const dur = e.end_ts === null ? (now.getTime() - Date.parse(e.start_ts)) / 60000 : e.duration_min ?? 0
+      m.set(e.employer_id, (m.get(e.employer_id) ?? 0) + Math.max(0, dur))
+    }
+    return m
+  }, [entries, selectedDay, now])
+
   // Aggregat über alle Arbeitgeber mit Vorgabe.
   const sollDayTotalMin = useMemo(() => {
     const key = dayKey(selectedDay)
     return employers.reduce((sum, e) => sum + dailySoll(e.id, key), 0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [employers, areaHours, selectedDay])
+  }, [employers, areaHours, selectedDay, settings.start_date])
 
   // GEPLANT BIS JETZT: anteiliges Tages-Soll bis zur aktuellen Uhrzeit.
   // Vergangene Tage → volles Tages-Soll, künftige → 0, heute → ab WORK_START linear.
@@ -1097,6 +1128,7 @@ export default function MeinTag({ theme, onToggleTheme, onOpenTodos, onOpenCalen
     for (const e of entries) {
       const i = dayKeys.indexOf(dayKey(new Date(e.start_ts)))
       if (i < 0) continue
+      if (dayKeys[i] < settings.start_date) continue // vor Stichtag: kein Ist in den Saldo
       const dur = e.end_ts === null ? (now.getTime() - Date.parse(e.start_ts)) / 60000 : e.duration_min ?? 0
       let arr = bookedByEmp.get(e.employer_id)
       if (!arr) {
@@ -1109,6 +1141,7 @@ export default function MeinTag({ theme, onToggleTheme, onOpenTodos, onOpenCalen
     // Begonnene Abwesenheiten (Mo–Fr) zählen wie gebuchte Zeit → füllen das Tages-Soll.
     for (const emp of employers) {
       for (let i = 0; i <= 4; i++) {
+        if (dayKeys[i] < settings.start_date) continue // vor Stichtag: keine Abwesenheits-Gutschrift
         const add = absenceIst(dayKeys[i], emp.id)
         if (add > 0) {
           let arr = bookedByEmp.get(emp.id)
@@ -1121,31 +1154,39 @@ export default function MeinTag({ theme, onToggleTheme, onOpenTodos, onOpenCalen
       }
     }
 
+    // Gesamtsaldo nur aus Arbeitsbereichen; private Bereiche separat ans Ende (nicht im Gesamt).
+    const workEmps = employers.filter((e) => e.kind === 'work')
+    const privEmps = employers.filter((e) => e.kind === 'private')
     const scopes = [
-      { label: 'Gesamt', accent: 'var(--accent, #22C55E)', empIds: employers.map((e) => e.id) },
-      ...employers.map((e) => ({ label: e.name, accent: colorFor(e.id), empIds: [e.id] })),
+      { label: 'Gesamt', accent: 'var(--accent, #22C55E)', empIds: workEmps.map((e) => e.id), priv: false, goal: 0 },
+      ...workEmps.map((e) => ({ label: e.name, accent: colorFor(e.id), empIds: [e.id], priv: false, goal: 0 })),
+      ...privEmps.map((e) => ({ label: e.name, accent: colorFor(e.id), empIds: [e.id], priv: true, goal: e.weekly_goal_min })),
     ]
-    const nowMinAfterStart = Math.max(0, (hourOfDay(now) - WORK_START_HOUR) * 60)
-
     const pages: KontoPage[] = scopes.map((sc) => {
+      // Privat: Wochenziel gleichmäßig auf 7 Tage als Tagesreferenz; Saldo gegen das ganze Wochenziel.
+      const dailyRef = sc.priv ? sc.goal / 7 : 0
       const sollDay: number[] = []
       const bookedDay: number[] = []
       for (let i = 0; i < 7; i++) {
         let s = 0
         let b = 0
         for (const id of sc.empIds) {
-          s += dailySoll(id, dayKeys[i]) // Soll je Wochentag (area_hours; Feiertag/Privat → 0)
+          s += sc.priv ? dailyRef : dailySoll(id, dayKeys[i]) // Arbeit: area_hours; Privat: Wochenziel/7
           b += bookedByEmp.get(id)?.[i] ?? 0
         }
         sollDay.push(s)
         bookedDay.push(b)
       }
-      const sollMin = sollDay.reduce((a, b) => a + b, 0)
+      const sollMin = sc.priv ? sc.goal : sollDay.reduce((a, b) => a + b, 0)
       const bookedMin = bookedDay.reduce((a, b) => a + b, 0)
       let sollElapsed = 0
-      for (let i = 0; i < 7; i++) {
-        if (todayIdx < 0 || i < todayIdx) sollElapsed += sollDay[i]
-        else if (i === todayIdx) sollElapsed += Math.min(sollDay[i], nowMinAfterStart)
+      if (sc.priv) {
+        sollElapsed = sc.goal // privat: ganzes Wochenziel gegen bisher Erfasstes rechnen
+      } else {
+        // Bis Ende des heutigen Tages: vergangene Tage + heute VOLLES Tages-Soll, künftige = 0.
+        for (let i = 0; i < 7; i++) {
+          if (todayIdx < 0 || i <= todayIdx) sollElapsed += sollDay[i]
+        }
       }
       const days: KontoDaySeg[] = sollDay.map((s, i) => ({
         label: DAY_LABELS[i],
@@ -1154,6 +1195,7 @@ export default function MeinTag({ theme, onToggleTheme, onOpenTodos, onOpenCalen
         color: sc.accent,
         bookedMin: bookedDay[i],
         sollMin: s,
+        isTod: i === todayIdx,
       }))
       return { label: sc.label, accent: sc.accent, saldoMin: bookedMin - sollElapsed, bookedMin, sollMin, days }
     })
@@ -1161,7 +1203,7 @@ export default function MeinTag({ theme, onToggleTheme, onOpenTodos, onOpenCalen
     const weekDays = Array.from({ length: 7 }, (_, i) => addDays(monday, i))
     return { pages, kw, span, weekDays }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entries, now, areaHours, employers, absences])
+  }, [entries, now, areaHours, employers, absences, settings.start_date])
 
   function entryLabel(e: Entry): { name: string; sub: string; color: string } {
     const emp = employersById.get(e.employer_id)
@@ -1374,7 +1416,8 @@ export default function MeinTag({ theme, onToggleTheme, onOpenTodos, onOpenCalen
             isToday={isToday}
             nowMin={nowMin}
             onOpenCalendar={onOpenCalendar}
-            onEditEntry={(id) => { const e = entries.find((x) => x.id === id); if (e) setEditEntry(e) }}
+            onOpenEntry={(id) => { const e = entries.find((x) => x.id === id); if (e) setSegPopup({ kind: 'entry', entry: e }) }}
+            onOpenPlan={(b) => setSegPopup({ kind: 'plan', label: b.label, s: b.start_min / 60, e: b.end_min / 60, color: b.color })}
             todos={heroTodos}
             onOpenTodos={onOpenTodos}
             onAddTodo={addTodoQuick}
@@ -1382,57 +1425,35 @@ export default function MeinTag({ theme, onToggleTheme, onOpenTodos, onOpenCalen
 
           {/* right: live card + stats + activity list — oben fix, nur die Aktivitäten scrollen.
               Grid mit minmax(0,1fr) begrenzt die Aktivitäten-Zeile zuverlässig (nested flex versagt hier). */}
-          <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateRows: 'auto auto auto minmax(0, 1fr)', gap: 14 }}>
-            {/* live / running + to-dos row */}
+          <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateRows: 'auto auto minmax(0, 1fr)', gap: 18 }}>
+            {/* Dreierreihe: Erfasst · Geplant · To-Dos */}
             <div style={{ display: 'flex', gap: 14, flex: 'none' }}>
-              <div style={{ flex: 1.7, minWidth: 0, borderRadius: 24, ...GLASS, boxShadow: '0 10px 30px var(--hair)', padding: '13px 22px', position: 'relative', overflow: 'hidden' }}>
-                <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 6, background: running ? runColor : 'var(--ink3)' }} />
-                {running && runningLabel ? (
-                  <>
-                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '1.5px', textTransform: 'uppercase', color: 'var(--ink3)' }}>{isPaused ? 'Pausiert' : 'Läuft gerade'}</div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 6 }}>
-                      <div style={{ width: 11, height: 11, borderRadius: '50%', background: runColor, animation: isPaused ? 'none' : 'pulseDot 1.6s ease-in-out infinite' }} />
-                      <div style={{ fontSize: 34, fontWeight: 800, letterSpacing: '-1.5px', fontVariantNumeric: 'tabular-nums', lineHeight: 1, color: runColor }}>{fmtHM(runningElapsed)}</div>
-                      <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{runningLabel.name}</div>
-                    </div>
-                  </>
-                ) : (
-                  <div>
-                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '1.5px', textTransform: 'uppercase', color: 'var(--ink3)' }}>Bereit</div>
-                    <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--ink)', marginTop: 4 }}>Keine laufende Erfassung</div>
-                  </div>
-                )}
+              <div style={{ flex: 1, minWidth: 0, borderRadius: 20, ...GLASS, padding: '19px 20px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--ink3)' }}>{isToday ? 'Erfasst heute' : 'Erfasst'}</div>
+                <div style={{ fontSize: 30, fontWeight: 800, color: 'var(--ink)', letterSpacing: '-1px', marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>{fmtDur(trackedMin)}</div>
+              </div>
+              <div style={{ flex: 1, minWidth: 0, borderRadius: 20, ...GLASS, padding: '19px 20px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--ink3)' }}>Geplant</div>
+                <div style={{ fontSize: 30, fontWeight: 800, color: 'var(--ink3)', letterSpacing: '-1px', marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>{fmtDur(geplantMin)}</div>
               </div>
 
               {/* To-Dos (öffnet den To-Dos-Screen) */}
               <div
                 onClick={onOpenTodos}
                 title="To-Dos öffnen"
-                style={{ flex: 1, minWidth: 0, borderRadius: 24, background: 'linear-gradient(150deg, #2F6BFF 0%, #2563EB 55%, #4F46E5 100%)', border: '1px solid #2563EB', boxShadow: '0 12px 32px rgba(37,99,235,0.4)', padding: '13px 20px', position: 'relative', overflow: 'hidden', cursor: 'pointer' }}
+                style={{ flex: 1, minWidth: 0, borderRadius: 20, background: 'linear-gradient(150deg, #2F6BFF 0%, #2563EB 55%, #4F46E5 100%)', border: '1px solid #2563EB', boxShadow: '0 12px 32px rgba(37,99,235,0.4)', padding: '19px 20px', position: 'relative', overflow: 'hidden', cursor: 'pointer' }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '1.5px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.85)' }}>To-Dos</div>
                   <div style={{ width: 24, height: 24, borderRadius: 8, background: 'rgba(255,255,255,0.22)', display: 'grid', placeItems: 'center', color: '#fff', fontSize: 14, fontWeight: 800 }}>☰</div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginTop: 4 }}>
-                  <div style={{ fontSize: 34, fontWeight: 800, letterSpacing: '-1.5px', lineHeight: 1, color: '#fff', fontVariantNumeric: 'tabular-nums' }}>{todoOpenCount}</div>
+                  <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: '-1.5px', lineHeight: 1, color: '#fff', fontVariantNumeric: 'tabular-nums' }}>{todoOpenCount}</div>
                   <div style={{ fontSize: 14, fontWeight: 700, color: 'rgba(255,255,255,0.9)' }}>offen</div>
                 </div>
                 <div style={{ fontSize: 12, fontWeight: 800, color: todoOverdueCount > 0 ? '#FECACA' : 'rgba(255,255,255,0.9)', marginTop: 3 }}>
                   {todoOverdueCount > 0 ? `${todoOverdueCount} überfällig` : 'Alles im Plan'}
                 </div>
-              </div>
-            </div>
-
-            {/* stats */}
-            <div style={{ display: 'flex', gap: 14, flex: 'none' }}>
-              <div style={{ flex: 1, borderRadius: 20, ...GLASS, padding: '11px 20px' }}>
-                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--ink3)' }}>{isToday ? 'Erfasst heute' : 'Erfasst'}</div>
-                <div style={{ fontSize: 27, fontWeight: 800, color: 'var(--ink)', letterSpacing: '-1px', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>{fmtDur(trackedMin)}</div>
-              </div>
-              <div style={{ flex: 1, borderRadius: 20, ...GLASS, padding: '11px 20px' }}>
-                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--ink3)' }}>Geplant bis jetzt</div>
-                <div style={{ fontSize: 27, fontWeight: 800, color: 'var(--ink3)', letterSpacing: '-1px', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>{fmtDur(geplantMin)}</div>
               </div>
             </div>
 
@@ -1456,15 +1477,19 @@ export default function MeinTag({ theme, onToggleTheme, onOpenTodos, onOpenCalen
               ) : loadError ? (
                 <div style={{ color: '#E5484D', fontWeight: 700, padding: '8px 2px' }}>{loadError}</div>
               ) : (
-                <div className="no-scrollbar" style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, gridAutoRows: 'minmax(96px, max-content)', alignContent: 'start' }}>
+                <div className="no-scrollbar" style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, gridAutoRows: 'minmax(96px, max-content)', alignContent: 'start', maskImage: 'linear-gradient(to bottom, #000 calc(100% - 26px), transparent)', WebkitMaskImage: 'linear-gradient(to bottom, #000 calc(100% - 26px), transparent)' }}>
                   {employers.filter((emp) => actFilter === 'all' || emp.kind === actFilter).map((emp) => {
                     const ist = istByEmployer.get(emp.id) ?? 0
+                    const isPrivate = emp.kind === 'private'
+                    const goal = emp.weekly_goal_min
+                    const weekIst = weekIstByEmployer.get(emp.id) ?? 0
                     const soll = sollDayMin(emp.id)
-                    const frac = soll > 0 ? ist / soll : 0
-                    const pct = soll > 0 ? Math.round(frac * 100) : 0
+                    // Privat: Donut = Wochenziel-Fortschritt (Woche-Ist / Ziel). Arbeit: Tag-Ist / Tag-Soll.
+                    const frac = isPrivate ? (goal > 0 ? Math.min(1, weekIst / goal) : 0) : soll > 0 ? ist / soll : 0
+                    const pct = isPrivate ? (goal > 0 ? Math.round((weekIst / goal) * 100) : 0) : soll > 0 ? Math.round((ist / soll) * 100) : 0
                     const color = colorFor(emp.id)
                     return (
-                      <div key={emp.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 18px', borderRadius: 22, ...GLASS }}>
+                      <div key={emp.id} onClick={() => { setAreaPopup(emp.id); setAreaProjOpen(null) }} title={`${emp.name} – Projekte & Details`} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 18px', borderRadius: 22, ...GLASS, cursor: 'pointer' }}>
                         <div style={{ position: 'relative', width: 64, height: 64, flex: 'none' }}>
                           <Donut size={64} frac={frac} color={color} />
                           <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', fontSize: 14, fontWeight: 800, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{pct}%</div>
@@ -1473,7 +1498,7 @@ export default function MeinTag({ theme, onToggleTheme, onOpenTodos, onOpenCalen
                         <div style={{ minWidth: 0 }}>
                           <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{emp.name}</div>
                           <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink2)', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
-                            {fmtDur(ist)} / {soll > 0 ? fmtDur(soll) : '—'}
+                            {isPrivate ? (goal > 0 ? `${fmtDur(ist)} heute · ${pct}% Wochenziel` : `${fmtDur(ist)} heute`) : `${fmtDur(ist)} / ${soll > 0 ? fmtDur(soll) : '—'}`}
                           </div>
                         </div>
                       </div>
@@ -1490,7 +1515,7 @@ export default function MeinTag({ theme, onToggleTheme, onOpenTodos, onOpenCalen
           <div
             onClick={() => setAddOpen(true)}
             title="Neue Aktivität"
-            style={{ position: 'absolute', right: 36, bottom: 36, width: 64, height: 64, borderRadius: 22, background: 'var(--accent, #22C55E)', boxShadow: '0 12px 30px rgba(34,197,94,0.45)', display: 'grid', placeItems: 'center', color: '#fff', fontSize: 34, fontWeight: 500, zIndex: 8, cursor: 'pointer' }}
+            style={{ position: 'absolute', right: 36, bottom: 36, width: 64, height: 64, borderRadius: 22, background: 'var(--accent, #22C55E)', boxShadow: '0 12px 30px color-mix(in srgb, var(--accent, #22C55E) 45%, transparent)', display: 'grid', placeItems: 'center', color: '#fff', fontSize: 34, fontWeight: 500, zIndex: 8, cursor: 'pointer' }}
           >
             +
           </div>
@@ -1534,7 +1559,7 @@ export default function MeinTag({ theme, onToggleTheme, onOpenTodos, onOpenCalen
               <div style={{ padding: '0 28px 26px', overflowY: 'auto' }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
                   <div style={{ fontSize: 44, fontWeight: 800, color: 'var(--ink)', letterSpacing: '-2px', fontVariantNumeric: 'tabular-nums' }}>{fmtSigned(konto.pages[weekPopupPage].saldoMin)}</div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink2)' }}>Saldo bis jetzt</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink2)' }}>Saldo · bis heute Abend</div>
                 </div>
                 <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
                   <div style={{ flex: 1, borderRadius: 14, ...GLASS, padding: '11px 14px' }}>
@@ -1642,6 +1667,94 @@ export default function MeinTag({ theme, onToggleTheme, onOpenTodos, onOpenCalen
             </div>
           </div>
         )}
+
+        {/* Bereichs-Detail: Projekte, Erfasst gesamt, Geplant (gewählter Tag) */}
+        {areaPopup !== null && (() => {
+          const emp = employersById.get(areaPopup)
+          if (!emp) return null
+          const color = colorFor(emp.id)
+          const byProj = new Map<string, { pid: number | null; entries: Entry[]; total: number }>()
+          for (const e of dayEntries) {
+            if (e.employer_id !== emp.id) continue
+            const dur = e.end_ts === null ? (now.getTime() - Date.parse(e.start_ts)) / 60000 : e.duration_min ?? 0
+            const key = String(e.project_id ?? 'none')
+            let g = byProj.get(key)
+            if (!g) { g = { pid: e.project_id, entries: [], total: 0 }; byProj.set(key, g) }
+            g.entries.push(e)
+            g.total += Math.max(0, dur)
+          }
+          const projRows = [...byProj.entries()].sort((a, b) => b[1].total - a[1].total)
+          const bookedSum = projRows.reduce((s, [, g]) => s + g.total, 0)
+          const totalIst = istByEmployer.get(emp.id) ?? 0
+          const absMin = Math.max(0, totalIst - bookedSum)
+          const geplant = sollDayMin(emp.id)
+          return (
+            <div onClick={() => setAreaPopup(null)} style={{ position: 'absolute', inset: 0, zIndex: 80, background: 'var(--veil)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 34 }}>
+              <div onClick={(ev) => ev.stopPropagation()} style={{ width: 380, maxHeight: '86%', display: 'flex', flexDirection: 'column', borderRadius: 24, background: 'var(--screen)', border: '1px solid var(--border)', boxShadow: 'var(--shadow)', overflow: 'hidden', animation: 'popIn .16s ease' }}>
+                <div style={{ padding: '22px 24px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 12, background: `color-mix(in srgb, ${color} 18%, transparent)`, display: 'grid', placeItems: 'center', fontSize: 20, flex: 'none' }}>{emp.icon}</div>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 19, fontWeight: 800, color: 'var(--ink)', letterSpacing: '-0.3px' }}>{emp.name}</div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink3)' }}>{heroBig}</div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
+                    <div style={{ flex: 1, borderRadius: 16, ...GLASS, padding: '12px 14px' }}>
+                      <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--ink3)' }}>Erfasst gesamt</div>
+                      <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--ink)', letterSpacing: '-0.5px', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>{fmtDur(totalIst)}</div>
+                    </div>
+                    <div style={{ flex: 1, borderRadius: 16, ...GLASS, padding: '12px 14px' }}>
+                      <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--ink3)' }}>Geplant</div>
+                      <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--ink3)', letterSpacing: '-0.5px', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>{geplant > 0 ? fmtDur(geplant) : '—'}</div>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--ink3)', margin: '18px 0 10px' }}>Projekte</div>
+                  <div className="no-scrollbar" style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {projRows.length === 0 && absMin === 0 && (
+                      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink3)', padding: '4px 0' }}>Keine Buchungen an diesem Tag.</div>
+                    )}
+                    {projRows.map(([key, g]) => {
+                      const open = areaProjOpen === key
+                      const name = g.pid != null ? projectsById.get(g.pid)?.name ?? 'Projekt' : 'Ohne Projekt'
+                      return (
+                        <div key={key} style={{ borderRadius: 13, background: 'var(--glass)', border: '1px solid var(--hair)', overflow: 'hidden' }}>
+                          <div onClick={() => setAreaProjOpen(open ? null : key)} title="Zeiten & Notizen anzeigen" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', cursor: 'pointer' }}>
+                            <div style={{ width: 9, height: 9, borderRadius: 3, background: color, flex: 'none' }} />
+                            <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 700, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</div>
+                            <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{fmtDur(g.total)}</div>
+                            <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--ink3)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s', flex: 'none' }}>›</div>
+                          </div>
+                          {open && (
+                            <div>
+                              {[...g.entries].sort((a, b) => Date.parse(a.start_ts) - Date.parse(b.start_ts)).map((e) => {
+                                const s = new Date(e.start_ts)
+                                const end = e.end_ts ? new Date(e.end_ts) : null
+                                return (
+                                  <div key={e.id} style={{ padding: '8px 12px 8px 31px', borderTop: '1px solid var(--hair)' }}>
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink2)', fontVariantNumeric: 'tabular-nums' }}>{fmtClock(s)}–{end ? fmtClock(end) : 'jetzt'}</div>
+                                    {e.note && <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink)', marginTop: 3, lineHeight: 1.4, whiteSpace: 'pre-wrap' }}>{e.note}</div>}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                    {absMin > 0 && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 13, background: 'var(--glass)', border: '1px solid var(--hair)' }}>
+                        <div style={{ width: 9, height: 9, borderRadius: 3, background: 'var(--ink3)', flex: 'none' }} />
+                        <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 700, color: 'var(--ink2)' }}>Abwesenheit</div>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--ink2)', fontVariantNumeric: 'tabular-nums' }}>{fmtDur(absMin)}</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )
+        })()}
       </div>
     </div>
   )

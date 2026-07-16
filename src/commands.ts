@@ -2,7 +2,7 @@
 // Wird von App.tsx (Dispatcher), Verwalten.tsx (Konfiguration) und
 // Spotlight.tsx (Suche) geteilt.
 
-export type CommandGroup = 'Navigation' | 'Ansicht' | 'Aktionen'
+export type CommandGroup = 'Navigation' | 'Ansicht' | 'Aktionen' | 'Zeitraum'
 
 export type CommandId =
   | 'nav-mein-tag'
@@ -12,9 +12,18 @@ export type CommandId =
   | 'nav-verwalten'
   | 'toggle-theme'
   | 'open-spotlight'
+  | 'filter-toggle'
+  | 'export-open'
   | 'new-entry'
   | 'toggle-tracking'
   | 'new-todo'
+  | 'new-absence'
+  | 'period-prev'
+  | 'period-next'
+  | 'level-up'
+  | 'level-down'
+  | 'plan-split'
+  | 'planner-toggle'
 
 export interface CommandDef {
   id: CommandId
@@ -31,12 +40,21 @@ export const COMMANDS: CommandDef[] = [
   { id: 'nav-verwalten', label: 'Verwalten', group: 'Navigation', icon: '⚙️' },
   { id: 'open-spotlight', label: 'Suche öffnen', group: 'Ansicht', icon: '🔍' },
   { id: 'toggle-theme', label: 'Farbschema wechseln', group: 'Ansicht', icon: '🌓' },
+  { id: 'filter-toggle', label: 'Filter (Kalender)', group: 'Ansicht', icon: '🎚️' },
+  { id: 'export-open', label: 'Export (Kalender)', group: 'Ansicht', icon: '📤' },
   { id: 'new-entry', label: 'Neue Aktivität', group: 'Aktionen', icon: '➕' },
   { id: 'toggle-tracking', label: 'Tracking Start/Stopp', group: 'Aktionen', icon: '⏱️' },
   { id: 'new-todo', label: 'Neues To-Do', group: 'Aktionen', icon: '📝' },
+  { id: 'new-absence', label: 'Abwesenheit anlegen', group: 'Aktionen', icon: '🌴' },
+  { id: 'period-prev', label: 'Periode zurück', group: 'Zeitraum', icon: '◀️' },
+  { id: 'period-next', label: 'Periode vor', group: 'Zeitraum', icon: '▶️' },
+  { id: 'level-down', label: 'Ebene runter (rein: Gesamt→Tag)', group: 'Zeitraum', icon: '🔽' },
+  { id: 'level-up', label: 'Ebene hoch (raus: Tag→Gesamt)', group: 'Zeitraum', icon: '🔼' },
+  { id: 'plan-split', label: 'Plan anzeigen im Kalender', group: 'Zeitraum', icon: '📐' },
+  { id: 'planner-toggle', label: 'Planner öffnen', group: 'Zeitraum', icon: '✦' },
 ]
 
-export const COMMAND_GROUPS: CommandGroup[] = ['Navigation', 'Ansicht', 'Aktionen']
+export const COMMAND_GROUPS: CommandGroup[] = ['Navigation', 'Ansicht', 'Aktionen', 'Zeitraum']
 
 const COMMAND_MAP = new Map(COMMANDS.map((c) => [c.id, c]))
 export function commandById(id: CommandId): CommandDef | undefined {
@@ -55,6 +73,15 @@ export const DEFAULT_HOTKEYS: Record<CommandId, string> = {
   'new-entry': 'mod+e',
   'toggle-tracking': 'mod+enter',
   'new-todo': 'mod+shift+e',
+  'new-absence': 'mod+shift+a',
+  'filter-toggle': 'mod+shift+f',
+  'export-open': 'mod+shift+x',
+  'period-prev': 'mod+shift+left',
+  'period-next': 'mod+shift+right',
+  'level-up': 'mod+shift+up',
+  'level-down': 'mod+shift+down',
+  'plan-split': 'mod+shift+i',
+  'planner-toggle': 'mod+shift+p',
 }
 
 // ── Hotkey-Utilities ────────────────────────────────────────────────────────

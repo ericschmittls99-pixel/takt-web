@@ -470,7 +470,7 @@ export default function Verwalten({ theme, onToggleTheme, onBack, onOpenTodos, o
                 <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
                   <div style={{ flex: '1 1 200px' }}>
                     <div style={label}>Startdatum (Zählung ab)</div>
-                    <input type="date" value={settings.start_date} onChange={(e) => void persistSettings({ start_date: e.target.value })} style={{ ...field, fontSize: 15 }} />
+                    <input type="date" lang="de-DE" value={settings.start_date} onChange={(e) => void persistSettings({ start_date: e.target.value })} style={{ ...field, fontSize: 15 }} />
                   </div>
                   <div style={{ flex: '1 1 200px' }}>
                     <div style={label}>Bundesland (Feiertage)</div>

@@ -1,6 +1,7 @@
 import { useState, type CSSProperties } from 'react'
 import { api, type Employer, type Entry, type Project } from '../api'
 import { employerColor } from '../colors'
+import TimeField from './TimeField'
 
 const GLASS: CSSProperties = {
   background: 'var(--glass)',
@@ -141,8 +142,8 @@ export default function EntryEditor({
 
         {/* Start / Ende */}
         <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
-          <div style={{ flex: 1 }}><div style={label}>Start</div><input type="time" value={start} onChange={(e) => setStart(e.target.value)} style={timeField} /></div>
-          <div style={{ flex: 1 }}><div style={label}>Ende</div><input type="time" value={end} onChange={(e) => setEnd(e.target.value)} style={timeField} /></div>
+          <div style={{ flex: 1 }}><div style={label}>Start</div><TimeField value={start} onChange={setStart} style={timeField} /></div>
+          <div style={{ flex: 1 }}><div style={label}>Ende</div><TimeField value={end} onChange={setEnd} style={timeField} /></div>
         </div>
 
         <div style={{ display: 'flex', gap: 12, marginTop: 18 }}>

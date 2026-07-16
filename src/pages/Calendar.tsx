@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch
 import { api, type Absence, type AbsenceType, type AppSettings, type AreaHours, type Employer, type Entry, type PlannedBlock, type PlannedOverride, type Project } from '../api'
 import { employerColor } from '../colors'
 import EntryEditor from '../components/EntryEditor'
+import TimeField from '../components/TimeField'
 import { holidayName } from '../holidays'
 import { distributeAbsenceMinutes } from '../absence'
+import type { PageIntent } from '../App'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -178,7 +180,7 @@ function BlockEditor({
             <div style={{ display: 'flex', padding: 3, gap: 3, borderRadius: 13, background: 'var(--glass)', border: '1px solid var(--border)' }}>
               {(['day', 'plan'] as const).map((s) => (
                 <div key={s} onClick={() => onChange({ scope: s })} style={{ flex: 1, textAlign: 'center', padding: '9px 12px', borderRadius: 10, fontSize: 13, fontWeight: 800, cursor: 'pointer', color: draft.scope === s ? 'var(--ink)' : 'var(--ink3)', background: draft.scope === s ? 'var(--glass-strong)' : 'transparent', boxShadow: draft.scope === s ? '0 2px 8px var(--hair)' : 'none' }}>
-                  {s === 'day' ? 'Nur dieser Tag' : 'Im Plan (Standardwoche)'}
+                  {s === 'day' ? 'Nur dieser Tag' : 'Im Plan (Planner)'}
                 </div>
               ))}
             </div>
@@ -221,11 +223,11 @@ function BlockEditor({
           <div style={{ display: 'flex', gap: 12 }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '1.5px', textTransform: 'uppercase', color: 'var(--ink3)', marginBottom: 8 }}>Start</div>
-              <input type="time" value={draft.start} onChange={(e) => onChange({ start: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', borderRadius: 14, border: '1px solid var(--hair)', background: 'var(--glass)', padding: '12px 14px', fontSize: 16, fontWeight: 700, color: 'var(--ink)', fontFamily: 'inherit', outline: 'none' }} />
+              <TimeField value={draft.start} onChange={(v) => onChange({ start: v })} style={{ width: '100%', boxSizing: 'border-box', borderRadius: 14, border: '1px solid var(--hair)', background: 'var(--glass)', padding: '12px 14px', fontSize: 16, fontWeight: 700, color: 'var(--ink)', fontFamily: 'inherit', outline: 'none' }} />
             </div>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '1.5px', textTransform: 'uppercase', color: 'var(--ink3)', marginBottom: 8 }}>Ende</div>
-              <input type="time" value={draft.end} onChange={(e) => onChange({ end: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', borderRadius: 14, border: '1px solid var(--hair)', background: 'var(--glass)', padding: '12px 14px', fontSize: 16, fontWeight: 700, color: 'var(--ink)', fontFamily: 'inherit', outline: 'none' }} />
+              <TimeField value={draft.end} onChange={(v) => onChange({ end: v })} style={{ width: '100%', boxSizing: 'border-box', borderRadius: 14, border: '1px solid var(--hair)', background: 'var(--glass)', padding: '12px 14px', fontSize: 16, fontWeight: 700, color: 'var(--ink)', fontFamily: 'inherit', outline: 'none' }} />
             </div>
           </div>
 
@@ -233,7 +235,7 @@ function BlockEditor({
             <div style={{ borderTop: '1px solid var(--hair)', paddingTop: 18 }}>
               <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '1.5px', textTransform: 'uppercase', color: 'var(--ink3)', marginBottom: 8 }}>Teilen bei <span style={{ fontWeight: 600, textTransform: 'none', letterSpacing: 0 }}>· in zwei Blöcke</span></div>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                <input type="time" value={draft.splitAt} onChange={(e) => onChange({ splitAt: e.target.value })} style={{ flex: 1, boxSizing: 'border-box', borderRadius: 14, border: '1px solid var(--hair)', background: 'var(--glass)', padding: '12px 14px', fontSize: 16, fontWeight: 700, color: 'var(--ink)', fontFamily: 'inherit', outline: 'none' }} />
+                <TimeField value={draft.splitAt} onChange={(v) => onChange({ splitAt: v })} style={{ flex: 1, boxSizing: 'border-box', borderRadius: 14, border: '1px solid var(--hair)', background: 'var(--glass)', padding: '12px 14px', fontSize: 16, fontWeight: 700, color: 'var(--ink)', fontFamily: 'inherit', outline: 'none' }} />
                 <div onClick={busy ? undefined : onSplit} style={{ padding: '12px 22px', borderRadius: 14, background: '#2563EB', color: '#fff', fontWeight: 800, fontSize: 15, cursor: busy ? 'default' : 'pointer', whiteSpace: 'nowrap', boxShadow: '0 8px 20px rgba(37,99,235,0.35)' }}>Teilen</div>
               </div>
             </div>
@@ -267,10 +269,36 @@ interface CalendarProps {
   settings: AppSettings
   selectedDay: Date
   setSelectedDay: Dispatch<SetStateAction<Date>>
+  intent: PageIntent | null
+  onIntentDone: () => void
 }
 
-export default function Calendar({ theme, onToggleTheme, onBack, onOpenTodos, onOpenSpotlight, settings, selectedDay, setSelectedDay }: CalendarProps) {
+export default function Calendar({ theme, onToggleTheme, onBack, onOpenTodos, onOpenSpotlight, settings, selectedDay, setSelectedDay, intent, onIntentDone }: CalendarProps) {
   const [calView, setCalView] = useState<'week' | 'month' | 'year' | 'planner'>('week')
+  const [splitPlan, setSplitPlan] = useState(false) // Wochenansicht: Ist links, Plan rechts (kompletter Plan)
+
+  // Command-Intents: Periode vor/zurück, Plan (Standardwoche) an/aus.
+  const lastIntentNonce = useRef(0)
+  useEffect(() => {
+    if (!intent || intent.nonce === lastIntentNonce.current) return
+    lastIntentNonce.current = intent.nonce
+    if (intent.action === 'period-prev') calPrev()
+    else if (intent.action === 'period-next') calNext()
+    else if (intent.action === 'planner-toggle') setCalView((v) => (v === 'planner' ? 'week' : 'planner'))
+    else if (intent.action === 'plan-split') { setCalView('week'); setSplitPlan((s) => !s) }
+    else if (intent.action === 'level-up' || intent.action === 'level-down') {
+      const dir = intent.action === 'level-up' ? 1 : -1
+      const ladder: Array<'week' | 'month' | 'year'> = ['week', 'month', 'year']
+      setCalView((v) => {
+        const i = ladder.indexOf(v as 'week' | 'month' | 'year')
+        return ladder[Math.max(0, Math.min(2, (i < 0 ? 0 : i) + dir))]
+      })
+    } else if (intent.action === 'new-absence') openAbsSheet()
+    else if (intent.action === 'filter-toggle') setFilterOpen((o) => !o)
+    else if (intent.action === 'export-open') openExport()
+    onIntentDone()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [intent])
   const [employers, setEmployers] = useState<Employer[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [planned, setPlanned] = useState<PlannedBlock[]>([])
@@ -555,7 +583,7 @@ export default function Calendar({ theme, onToggleTheme, onBack, onOpenTodos, on
   }
 
   const periodTitle =
-    isPlanner ? 'Standardwoche'
+    isPlanner ? 'Planner'
       : calView === 'week' ? `KW ${isoWeek(weekStart)} · ${weekStart.getDate()}.–${addDays(weekStart, 6).getDate()}. ${MONTHS_SHORT[addDays(weekStart, 6).getMonth()]}`
       : calView === 'month' ? `${MONTHS[month]} ${year}`
       : String(year)
@@ -876,11 +904,12 @@ export default function Calendar({ theme, onToggleTheme, onBack, onOpenTodos, on
     document.addEventListener('pointerup', up)
   }
 
-  function planBlockEl(b: PlanBlock, mode: 'week' | 'planner', colKey: string) {
+  function planBlockEl(b: PlanBlock, mode: 'week' | 'planner', colKey: string, half: 'full' | 'right' = 'full') {
     const h = Math.max(16, ((b.end_min - b.start_min) / 60) * HOUR_H - 2)
     const color = colorFor(b.employer_id)
+    const hx = half === 'right' ? { left: 'calc(50% + 1px)', right: 3 } : { left: 3, right: 3 }
     return (
-      <div key={b.key} data-block onPointerDown={(e) => startBlockDrag(b, mode, colKey, e)} title={planLabel(b)} style={{ position: 'absolute', left: 3, right: 3, top: (b.start_min / 60) * HOUR_H, height: h, borderRadius: 9, background: `color-mix(in srgb, ${color} 14%, transparent)`, border: `1.5px dashed ${color}`, padding: '4px 7px', overflow: 'hidden', boxSizing: 'border-box', cursor: 'grab', touchAction: 'none' }}>
+      <div key={b.key} data-block onPointerDown={(e) => startBlockDrag(b, mode, colKey, e)} title={planLabel(b)} style={{ position: 'absolute', left: hx.left, right: hx.right, top: (b.start_min / 60) * HOUR_H, height: h, borderRadius: 9, background: `color-mix(in srgb, ${color} 14%, transparent)`, border: `1.5px dashed ${color}`, padding: '4px 7px', overflow: 'hidden', boxSizing: 'border-box', cursor: 'grab', touchAction: 'none' }}>
         {h >= 22 && <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{planLabel(b)}</div>}
         {h >= 38 && <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink2)', fontVariantNumeric: 'tabular-nums' }}>{minToHHMM(b.start_min)}–{minToHHMM(b.end_min)}</div>}
       </div>
@@ -897,7 +926,7 @@ export default function Calendar({ theme, onToggleTheme, onBack, onOpenTodos, on
 
   // --- Body-Renderer ---
   const dayHeader = (labels: { label: string; date?: number; isTod?: boolean; holiday?: string | null }[]) => (
-    <div style={{ position: 'sticky', top: 0, zIndex: 4, background: 'var(--screen)', display: 'flex', paddingLeft: 52, paddingRight: 6, borderBottom: '1px solid var(--hair)', paddingBottom: 8, paddingTop: 2 }}>
+    <div style={{ position: 'sticky', top: 0, zIndex: 4, background: 'var(--glass)', backdropFilter: 'blur(24px) saturate(180%)', WebkitBackdropFilter: 'blur(24px) saturate(180%)', display: 'flex', paddingLeft: 52, paddingRight: 6, borderBottom: '1px solid var(--hair)', paddingBottom: 8, paddingTop: 2 }}>
       {labels.map((c, i) => (
         <div key={i} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
           <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--ink3)' }}>{c.label}</div>
@@ -938,8 +967,16 @@ export default function Calendar({ theme, onToggleTheme, onBack, onOpenTodos, on
               const isTod = dayKey(d) === dayKey(today)
               const colKey = dayKey(d)
               const tracked = !isFut ? trackedForDay(d) : []
-              let plannedList = isFut || isTod ? resolveDayPlan(d) : []
-              if (isTod) plannedList = plannedList.filter((b) => !tracked.some((t) => b.start_min < t.e && t.s < b.end_min))
+              let plannedList: PlanBlock[]
+              if (splitPlan) {
+                // Split-Ansicht: kompletter Plan (alle Tage, ungefiltert) in eigener Spalte.
+                plannedList = resolveDayPlan(d)
+              } else {
+                plannedList = isFut || isTod ? resolveDayPlan(d) : []
+                // Heute: Planblock ausblenden, wenn er zeitlich komplett abgelaufen ist ODER
+                // von einer erfassten Aktivität überlappt wird (bereichs-/endzeit-unabhängig).
+                if (isTod) plannedList = plannedList.filter((b) => b.end_min > nowMin && !tracked.some((t) => b.start_min < t.e && t.s < b.end_min))
+              }
               const abs = absencesForDate(d)
               return (
                 <div key={colKey} data-daycol={colKey} onDoubleClick={(e) => onColumnDblClick(colKey, 'week', e)} style={{ flex: 1, position: 'relative', borderLeft: '1px solid var(--hair)' }}>
@@ -953,11 +990,11 @@ export default function Calendar({ theme, onToggleTheme, onBack, onOpenTodos, on
                       </div>
                     )
                   })}
-                  {plannedList.map((b) => planBlockEl(b, 'week', colKey))}
+                  {plannedList.map((b) => planBlockEl(b, 'week', colKey, splitPlan ? 'right' : 'full'))}
                   {tracked.map((b) => {
                     const h = Math.max(16, ((b.e - b.s) / 60) * HOUR_H - 2)
                     return (
-                      <div key={`t${b.id}`} title={`${b.name} – zum Ansehen/Bearbeiten klicken`} onClick={(ev) => { ev.stopPropagation(); const en = entries.find((x) => x.id === b.id); if (en) setEntryPopup(en) }} style={{ position: 'absolute', left: 3, right: 3, top: (b.s / 60) * HOUR_H, height: h, borderRadius: 9, background: b.color, boxShadow: '0 3px 10px var(--hair)', padding: '4px 7px', overflow: 'hidden', boxSizing: 'border-box', zIndex: 2, cursor: 'pointer' }}>
+                      <div key={`t${b.id}`} title={`${b.name} – zum Ansehen/Bearbeiten klicken`} onClick={(ev) => { ev.stopPropagation(); const en = entries.find((x) => x.id === b.id); if (en) setEntryPopup(en) }} style={{ position: 'absolute', left: 3, right: splitPlan ? 'calc(50% + 1px)' : 3, top: (b.s / 60) * HOUR_H, height: h, borderRadius: 9, background: b.color, boxShadow: '0 3px 10px var(--hair)', padding: '4px 7px', overflow: 'hidden', boxSizing: 'border-box', zIndex: 2, cursor: 'pointer' }}>
                         {h >= 22 && <div style={{ fontSize: 11, fontWeight: 800, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.name}</div>}
                         {h >= 38 && <div style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.85)', fontVariantNumeric: 'tabular-nums' }}>{minToHHMM(b.s)}–{minToHHMM(b.e)}</div>}
                       </div>
@@ -1073,7 +1110,7 @@ export default function Calendar({ theme, onToggleTheme, onBack, onOpenTodos, on
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16, minHeight: 45 }}>
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10 }}>
             <div onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 15px', borderRadius: 14, ...GLASS, cursor: 'pointer', fontSize: 14, fontWeight: 800, color: 'var(--ink2)' }}>‹ Tag</div>
-            <div onClick={() => setCalView((v) => (v === 'planner' ? 'week' : 'planner'))} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 16px', borderRadius: 14, cursor: 'pointer', fontSize: 14, fontWeight: 800, background: isPlanner ? 'color-mix(in srgb, var(--accent, #22C55E) 14%, transparent)' : 'var(--glass)', border: `1.5px solid ${isPlanner ? 'var(--accent, #22C55E)' : 'var(--border)'}`, color: isPlanner ? 'var(--accent, #16A34A)' : 'var(--ink2)' }}>✦ Standardwoche</div>
+            <div onClick={() => setCalView((v) => (v === 'planner' ? 'week' : 'planner'))} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 16px', borderRadius: 14, cursor: 'pointer', fontSize: 14, fontWeight: 800, background: isPlanner ? 'color-mix(in srgb, var(--accent, #22C55E) 14%, transparent)' : 'var(--glass)', border: `1.5px solid ${isPlanner ? 'var(--accent, #22C55E)' : 'var(--border)'}`, color: isPlanner ? 'var(--accent, #16A34A)' : 'var(--ink2)' }}>✦ Planner</div>
             <div onClick={openAbsSheet} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 16px', borderRadius: 14, cursor: 'pointer', fontSize: 14, fontWeight: 800, background: 'var(--glass)', border: '1px solid var(--border)', color: 'var(--ink2)' }}>⊘ Abwesenheit</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, flex: 'none' }}>
@@ -1092,6 +1129,11 @@ export default function Calendar({ theme, onToggleTheme, onBack, onOpenTodos, on
                     {v === 'week' ? 'Woche' : v === 'month' ? 'Monat' : 'Jahr'}
                   </div>
                 ))}
+              </div>
+            )}
+            {!isPlanner && calView === 'week' && (
+              <div onClick={() => setSplitPlan((s) => !s)} title="Ist & Plan getrennt anzeigen (Ist links, Plan rechts)" style={{ width: 40, height: 40, borderRadius: '50%', ...GLASS, display: 'grid', placeItems: 'center', cursor: 'pointer', ...(splitPlan ? { background: 'color-mix(in srgb, var(--accent, #22C55E) 16%, transparent)', border: '1.5px solid var(--accent, #22C55E)', color: 'var(--accent, #16A34A)' } : { color: 'var(--ink2)' }) }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" /><path d="M12 4.5v15" /></svg>
               </div>
             )}
             <div style={{ position: 'relative' }}>
@@ -1273,11 +1315,11 @@ export default function Calendar({ theme, onToggleTheme, onBack, onOpenTodos, on
                 <div style={{ display: 'flex', gap: 12 }}>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '1.5px', textTransform: 'uppercase', color: 'var(--ink3)', marginBottom: 8 }}>Von</div>
-                    <input type="date" value={absDraft.start} onChange={(e) => setAbsDraft((d) => ({ ...d, start: e.target.value, end: d.end && d.end >= e.target.value ? d.end : e.target.value }))} style={{ width: '100%', boxSizing: 'border-box', borderRadius: 14, border: '1px solid var(--hair)', background: 'var(--glass)', padding: '12px 14px', fontSize: 16, fontWeight: 700, color: 'var(--ink)', fontFamily: 'inherit', outline: 'none' }} />
+                    <input type="date" lang="de-DE" value={absDraft.start} onChange={(e) => setAbsDraft((d) => ({ ...d, start: e.target.value, end: d.end && d.end >= e.target.value ? d.end : e.target.value }))} style={{ width: '100%', boxSizing: 'border-box', borderRadius: 14, border: '1px solid var(--hair)', background: 'var(--glass)', padding: '12px 14px', fontSize: 16, fontWeight: 700, color: 'var(--ink)', fontFamily: 'inherit', outline: 'none' }} />
                   </div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '1.5px', textTransform: 'uppercase', color: 'var(--ink3)', marginBottom: 8 }}>Bis</div>
-                    <input type="date" value={absDraft.end} min={absDraft.start} onChange={(e) => setAbsDraft((d) => ({ ...d, end: e.target.value }))} style={{ width: '100%', boxSizing: 'border-box', borderRadius: 14, border: '1px solid var(--hair)', background: 'var(--glass)', padding: '12px 14px', fontSize: 16, fontWeight: 700, color: 'var(--ink)', fontFamily: 'inherit', outline: 'none' }} />
+                    <input type="date" lang="de-DE" value={absDraft.end} min={absDraft.start} onChange={(e) => setAbsDraft((d) => ({ ...d, end: e.target.value }))} style={{ width: '100%', boxSizing: 'border-box', borderRadius: 14, border: '1px solid var(--hair)', background: 'var(--glass)', padding: '12px 14px', fontSize: 16, fontWeight: 700, color: 'var(--ink)', fontFamily: 'inherit', outline: 'none' }} />
                   </div>
                 </div>
                 <div>
@@ -1290,8 +1332,8 @@ export default function Calendar({ theme, onToggleTheme, onBack, onOpenTodos, on
                   </div>
                   {!absDraft.allDay && (
                     <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
-                      <input type="time" value={absDraft.startTime} onChange={(e) => setAbsDraft((d) => ({ ...d, startTime: e.target.value }))} style={{ flex: 1, boxSizing: 'border-box', borderRadius: 14, border: '1px solid var(--hair)', background: 'var(--glass)', padding: '12px 14px', fontSize: 16, fontWeight: 700, color: 'var(--ink)', fontFamily: 'inherit', outline: 'none' }} />
-                      <input type="time" value={absDraft.endTime} onChange={(e) => setAbsDraft((d) => ({ ...d, endTime: e.target.value }))} style={{ flex: 1, boxSizing: 'border-box', borderRadius: 14, border: '1px solid var(--hair)', background: 'var(--glass)', padding: '12px 14px', fontSize: 16, fontWeight: 700, color: 'var(--ink)', fontFamily: 'inherit', outline: 'none' }} />
+                      <TimeField value={absDraft.startTime} onChange={(v) => setAbsDraft((d) => ({ ...d, startTime: v }))} style={{ flex: 1, boxSizing: 'border-box', borderRadius: 14, border: '1px solid var(--hair)', background: 'var(--glass)', padding: '12px 14px', fontSize: 16, fontWeight: 700, color: 'var(--ink)', fontFamily: 'inherit', outline: 'none' }} />
+                      <TimeField value={absDraft.endTime} onChange={(v) => setAbsDraft((d) => ({ ...d, endTime: v }))} style={{ flex: 1, boxSizing: 'border-box', borderRadius: 14, border: '1px solid var(--hair)', background: 'var(--glass)', padding: '12px 14px', fontSize: 16, fontWeight: 700, color: 'var(--ink)', fontFamily: 'inherit', outline: 'none' }} />
                     </div>
                   )}
                 </div>
@@ -1368,11 +1410,11 @@ export default function Calendar({ theme, onToggleTheme, onBack, onOpenTodos, on
                 <div style={{ display: 'flex', gap: 12 }}>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '1.5px', textTransform: 'uppercase', color: 'var(--ink3)', marginBottom: 8 }}>Von</div>
-                    <input type="date" value={exp.from} onChange={(e) => setExp((s) => ({ ...s, from: e.target.value }))} style={{ width: '100%', boxSizing: 'border-box', borderRadius: 14, border: '1px solid var(--hair)', background: 'var(--glass)', padding: '12px 14px', fontSize: 16, fontWeight: 700, color: 'var(--ink)', fontFamily: 'inherit', outline: 'none' }} />
+                    <input type="date" lang="de-DE" value={exp.from} onChange={(e) => setExp((s) => ({ ...s, from: e.target.value }))} style={{ width: '100%', boxSizing: 'border-box', borderRadius: 14, border: '1px solid var(--hair)', background: 'var(--glass)', padding: '12px 14px', fontSize: 16, fontWeight: 700, color: 'var(--ink)', fontFamily: 'inherit', outline: 'none' }} />
                   </div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '1.5px', textTransform: 'uppercase', color: 'var(--ink3)', marginBottom: 8 }}>Bis</div>
-                    <input type="date" value={exp.to} min={exp.from} onChange={(e) => setExp((s) => ({ ...s, to: e.target.value }))} style={{ width: '100%', boxSizing: 'border-box', borderRadius: 14, border: '1px solid var(--hair)', background: 'var(--glass)', padding: '12px 14px', fontSize: 16, fontWeight: 700, color: 'var(--ink)', fontFamily: 'inherit', outline: 'none' }} />
+                    <input type="date" lang="de-DE" value={exp.to} min={exp.from} onChange={(e) => setExp((s) => ({ ...s, to: e.target.value }))} style={{ width: '100%', boxSizing: 'border-box', borderRadius: 14, border: '1px solid var(--hair)', background: 'var(--glass)', padding: '12px 14px', fontSize: 16, fontWeight: 700, color: 'var(--ink)', fontFamily: 'inherit', outline: 'none' }} />
                   </div>
                 </div>
                 <div>

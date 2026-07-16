@@ -10,9 +10,14 @@ import { COMMANDS, DEFAULT_HOTKEYS, eventToHotkey, type CommandId } from './comm
 
 type View = 'mein-tag' | 'todos' | 'calendar' | 'auswertung' | 'verwalten'
 
+type AuswMode = 'week' | 'month' | 'year' | 'gesamt'
+// Durchgängige Zoom-Leiter (Variante B): Tag (Mein Tag) ↔ Woche/Monat/Jahr/Gesamt (Auswertung).
+type Level = 'tag' | AuswMode
+const LEVELS: Level[] = ['tag', 'week', 'month', 'year', 'gesamt']
+
 // Seiten-interne Aktionen, die per Command ausgelöst werden. `nonce` erzwingt,
 // dass ein wiederholtes Auslösen derselben Aktion erneut greift.
-export type PageIntent = { action: 'new-entry' | 'toggle-tracking' | 'new-todo'; nonce: number }
+export type PageIntent = { action: 'new-entry' | 'toggle-tracking' | 'new-todo' | 'new-absence' | 'period-prev' | 'period-next' | 'planner-toggle' | 'plan-split' | 'level-up' | 'level-down' | 'filter-toggle' | 'export-open'; nonce: number }
 
 const DEFAULT_SETTINGS: AppSettings = {
   accent_color: '#22C55E',
@@ -41,7 +46,15 @@ export default function App() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [spotlightOpen, setSpotlightOpen] = useState(false)
   const [intent, setIntent] = useState<PageIntent | null>(null)
+  const [auswMode, setAuswMode] = useState<AuswMode>('week')
+  const [zoomLevel, setZoomLevel] = useState<Level>('tag')
   const toggleTheme = () => setTheme((t) => (t === 'light' ? 'dark' : 'light'))
+
+  // Zoom-Ebene mit der sichtbaren Seite synchron halten (Mein Tag = Tag, Auswertung = Modus).
+  useEffect(() => {
+    if (view === 'mein-tag') setZoomLevel('tag')
+    else if (view === 'auswertung') setZoomLevel(auswMode)
+  }, [view, auswMode])
 
   useEffect(() => {
     api
@@ -110,6 +123,50 @@ export default function App() {
         setView('todos')
         setIntent({ action: 'new-todo', nonce: Date.now() })
         break
+      case 'period-prev':
+      case 'period-next': {
+        const dir = id === 'period-next' ? 1 : -1
+        if (view === 'mein-tag') {
+          setSelectedDay((d) => { const x = new Date(d); x.setDate(x.getDate() + dir); x.setHours(0, 0, 0, 0); return x })
+        } else if (view === 'calendar' || view === 'auswertung') {
+          setIntent({ action: id, nonce: Date.now() })
+        }
+        break
+      }
+      case 'planner-toggle':
+        setView('calendar')
+        setIntent({ action: 'planner-toggle', nonce: Date.now() })
+        break
+      case 'plan-split':
+        setView('calendar')
+        setIntent({ action: 'plan-split', nonce: Date.now() })
+        break
+      case 'level-up':
+      case 'level-down': {
+        // Im Kalender bleibt die Ebene im Kalender (Woche/Monat/Jahr) statt in die Zoom-Leiter zu springen.
+        if (view === 'calendar') {
+          setIntent({ action: id, nonce: Date.now() })
+          break
+        }
+        const idx = LEVELS.indexOf(zoomLevel)
+        const level = LEVELS[id === 'level-up' ? Math.min(idx + 1, LEVELS.length - 1) : Math.max(idx - 1, 0)]
+        setZoomLevel(level)
+        if (level === 'tag') setView('mein-tag')
+        else { setAuswMode(level); setView('auswertung') }
+        break
+      }
+      case 'new-absence':
+        setView('calendar')
+        setIntent({ action: 'new-absence', nonce: Date.now() })
+        break
+      case 'filter-toggle':
+        setView('calendar')
+        setIntent({ action: 'filter-toggle', nonce: Date.now() })
+        break
+      case 'export-open':
+        setView('calendar')
+        setIntent({ action: 'export-open', nonce: Date.now() })
+        break
     }
   }
 
@@ -159,6 +216,8 @@ export default function App() {
         settings={settings}
         selectedDay={selectedDay}
         setSelectedDay={setSelectedDay}
+        intent={intent}
+        onIntentDone={clearIntent}
       />
     )
   } else if (view === 'verwalten') {
@@ -185,6 +244,10 @@ export default function App() {
         onOpenSpotlight={openSpotlight}
         settings={settings}
         setSelectedDay={setSelectedDay}
+        mode={auswMode}
+        onModeChange={setAuswMode}
+        intent={intent}
+        onIntentDone={clearIntent}
       />
     )
   } else {

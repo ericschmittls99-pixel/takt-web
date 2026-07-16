@@ -215,7 +215,7 @@ function TodoEditor({
           <div>
             <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '1.5px', textTransform: 'uppercase', color: 'var(--ink3)' }}>Fällig am <span style={{ fontWeight: 600, textTransform: 'none', letterSpacing: 0 }}>· optional</span></div>
             <input
-              type="date"
+              type="date" lang="de-DE"
               value={state.due}
               onChange={(e) => onChange({ due: e.target.value })}
               style={{ marginTop: 8, padding: '13px 16px', borderRadius: 14, border: '1px solid var(--hair)', background: 'var(--glass)', color: 'var(--ink)', fontSize: 16, fontWeight: 600, fontFamily: 'inherit', outline: 'none' }}
@@ -530,7 +530,7 @@ function InlineComposer({
               <div style={{ padding: '8px 11px 4px', display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink3)' }}>Datum</span>
                 <input
-                  type="date"
+                  type="date" lang="de-DE"
                   value={dueManual ? due : (liveDue?.date ?? '')}
                   onChange={(e) => { setDue(e.target.value); setDueManual(true) }}
                   style={{ flex: 1, borderRadius: 10, border: '1px solid var(--hair)', background: 'var(--glass)', padding: '8px 10px', fontSize: 14, fontWeight: 700, color: 'var(--ink)', fontFamily: 'inherit', outline: 'none' }}
