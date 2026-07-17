@@ -629,13 +629,14 @@ function IconBtn({
 interface AddModalProps {
   employers: Employer[]
   projects: Project[]
+  plannedBlocks: { employer_id: number; project_id: number | null; start_min: number; end_min: number }[]
   onClose: () => void
   onCreated: () => void
 }
 
 // Neue Aktivität anlegen. Aufbau wie der EntryEditor (Bereich → Projekt → Notiz),
 // „Erfassen" ergänzt Start/Ende, „Live" startet stattdessen den Timer.
-function AddModal({ employers, projects, onClose, onCreated }: AddModalProps) {
+function AddModal({ employers, projects, plannedBlocks, onClose, onCreated }: AddModalProps) {
   const [mode, setMode] = useState<'live' | 'log'>('live')
   const [employerId, setEmployerId] = useState<number | null>(employers.find((e) => e.active === 1)?.id ?? employers[0]?.id ?? null)
   const [projectId, setProjectId] = useState<number | null>(null)
@@ -696,6 +697,28 @@ function AddModal({ employers, projects, onClose, onCreated }: AddModalProps) {
           </div>
         </div>
         <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink2)', marginTop: 2 }}>{mode === 'live' ? 'Timer jetzt starten' : 'Zeiten manuell erfassen'}</div>
+
+        {/* Planblock übernehmen (nur Bereich & Projekt; Uhrzeit bleibt aktuell) */}
+        {plannedBlocks.length > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <div style={label}>Planblock übernehmen <span style={{ fontWeight: 600, textTransform: 'none', letterSpacing: 0 }}>· Bereich &amp; Projekt</span></div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {[...plannedBlocks].sort((a, b) => a.start_min - b.start_min).map((b, i) => {
+                const proj = b.project_id != null ? projects.find((p) => p.id === b.project_id) : undefined
+                const emp = employers.find((e) => e.id === b.employer_id)
+                const name = proj?.name ?? emp?.name ?? 'Block'
+                const color = emp?.color || employerColor(b.employer_id)
+                const active = b.employer_id === employerId && b.project_id === projectId
+                return (
+                  <div key={i} onClick={() => { setEmployerId(b.employer_id); setProjectId(b.project_id) }} style={chip(active, color)}>
+                    <div style={{ width: 9, height: 9, borderRadius: 3, background: color }} />
+                    {name} <span style={{ color: 'var(--ink3)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{pad2(Math.floor(b.start_min / 60))}:{pad2(b.start_min % 60)}</span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Bereich */}
         <div style={{ marginTop: 16 }}>
@@ -1599,6 +1622,7 @@ export default function MeinTag({ theme, onToggleTheme, onOpenTodos, onOpenCalen
           <AddModal
             employers={employers}
             projects={projects}
+            plannedBlocks={plannedDayResolved}
             onClose={() => setAddOpen(false)}
             onCreated={loadEntries}
           />
