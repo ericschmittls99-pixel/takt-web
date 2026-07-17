@@ -646,7 +646,8 @@ function AddModal({ employers, projects, plannedBlocks, onClose, onCreated }: Ad
   const [logDate, setLogDate] = useState(dayKey(new Date())) // Erfassen-Datum, Default heute
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [planPick, setPlanPick] = useState('') // Dropdown-Auswahl Planblock
+  const [planQuery, setPlanQuery] = useState('') // Planblock-Suchtext
+  const [planOpen, setPlanOpen] = useState(false) // Planblock-Liste offen
   const [projQuery, setProjQuery] = useState('') // Projekt-Suchtext
   const [projOpen, setProjOpen] = useState(false) // Projekt-Liste offen
 
@@ -705,35 +706,37 @@ function AddModal({ employers, projects, plannedBlocks, onClose, onCreated }: Ad
         {plannedBlocks.length > 0 && (
           <div style={{ marginTop: 16 }}>
             <div style={label}>Planblock übernehmen <span style={{ fontWeight: 600, textTransform: 'none', letterSpacing: 0 }}>· Bereich &amp; Projekt</span></div>
-            <select
-              value={planPick}
-              onChange={(e) => {
-                setPlanPick(e.target.value)
-                const i = Number(e.target.value)
-                if (e.target.value !== '' && i >= 0) {
-                  const b = [...plannedBlocks].sort((a, b) => a.start_min - b.start_min)[i]
-                  if (b) {
-                    setEmployerId(b.employer_id)
-                    setProjectId(b.project_id)
-                    const pj = b.project_id != null ? projects.find((p) => p.id === b.project_id) : undefined
-                    setProjQuery(pj?.name ?? '')
-                  }
-                }
-              }}
-              style={{ ...timeField, fontSize: 15, cursor: 'pointer' }}
-            >
-              <option value="">Planblock wählen …</option>
-              {[...plannedBlocks].sort((a, b) => a.start_min - b.start_min).map((b, i) => {
-                const proj = b.project_id != null ? projects.find((p) => p.id === b.project_id) : undefined
-                const emp = employers.find((e) => e.id === b.employer_id)
-                const name = proj?.name ?? emp?.name ?? 'Block'
-                return (
-                  <option key={i} value={i}>
-                    {name} · {pad2(Math.floor(b.start_min / 60))}:{pad2(b.start_min % 60)}–{pad2(Math.floor(b.end_min / 60))}:{pad2(b.end_min % 60)}
-                  </option>
-                )
-              })}
-            </select>
+            <input
+              value={planQuery}
+              onFocus={() => setPlanOpen(true)}
+              onChange={(e) => { setPlanQuery(e.target.value); setPlanOpen(true) }}
+              onBlur={() => window.setTimeout(() => setPlanOpen(false), 150)}
+              placeholder="Planblock suchen oder wählen …"
+              style={{ ...timeField, fontSize: 15 }}
+            />
+            {planOpen && (() => {
+              const ql = planQuery.trim().toLowerCase()
+              const items = [...plannedBlocks]
+                .sort((a, b) => a.start_min - b.start_min)
+                .map((b) => {
+                  const proj = b.project_id != null ? projects.find((p) => p.id === b.project_id) : undefined
+                  const emp = employers.find((e) => e.id === b.employer_id)
+                  return { b, name: proj?.name ?? emp?.name ?? 'Block', projName: proj?.name ?? '', time: `${pad2(Math.floor(b.start_min / 60))}:${pad2(b.start_min % 60)}–${pad2(Math.floor(b.end_min / 60))}:${pad2(b.end_min % 60)}`, color: emp?.color || employerColor(b.employer_id) }
+                })
+                .filter((it) => !ql || `${it.name} ${it.time}`.toLowerCase().includes(ql))
+              return (
+                <div className="no-scrollbar" style={{ marginTop: 8, maxHeight: 190, overflowY: 'auto', borderRadius: 14, border: '1px solid var(--border)', background: 'var(--glass)', display: 'flex', flexDirection: 'column', gap: 2, padding: 6 }}>
+                  {items.length === 0 && <div style={{ padding: '8px 10px', fontSize: 13, fontWeight: 600, color: 'var(--ink3)' }}>Kein passender Planblock</div>}
+                  {items.map((it, i) => (
+                    <div key={i} onMouseDown={(e) => { e.preventDefault(); setEmployerId(it.b.employer_id); setProjectId(it.b.project_id); setProjQuery(it.projName); setPlanQuery(`${it.name} · ${it.time}`); setPlanOpen(false) }} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px', borderRadius: 10, cursor: 'pointer' }}>
+                      <div style={{ width: 9, height: 9, borderRadius: 3, background: it.color, flex: 'none' }} />
+                      <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 700, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.name}</div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink3)', fontVariantNumeric: 'tabular-nums' }}>{it.time}</div>
+                    </div>
+                  ))}
+                </div>
+              )
+            })()}
           </div>
         )}
 
