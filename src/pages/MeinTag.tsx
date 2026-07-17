@@ -646,6 +646,9 @@ function AddModal({ employers, projects, plannedBlocks, onClose, onCreated }: Ad
   const [logDate, setLogDate] = useState(dayKey(new Date())) // Erfassen-Datum, Default heute
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [planPick, setPlanPick] = useState('') // Dropdown-Auswahl Planblock
+  const [projQuery, setProjQuery] = useState('') // Projekt-Suchtext
+  const [projOpen, setProjOpen] = useState(false) // Projekt-Liste offen
 
   const colorFor = (id: number) => employers.find((e) => e.id === id)?.color ?? employerColor(id)
   const areaList = employers.filter((e) => e.active === 1 || e.id === employerId)
@@ -702,21 +705,35 @@ function AddModal({ employers, projects, plannedBlocks, onClose, onCreated }: Ad
         {plannedBlocks.length > 0 && (
           <div style={{ marginTop: 16 }}>
             <div style={label}>Planblock übernehmen <span style={{ fontWeight: 600, textTransform: 'none', letterSpacing: 0 }}>· Bereich &amp; Projekt</span></div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            <select
+              value={planPick}
+              onChange={(e) => {
+                setPlanPick(e.target.value)
+                const i = Number(e.target.value)
+                if (e.target.value !== '' && i >= 0) {
+                  const b = [...plannedBlocks].sort((a, b) => a.start_min - b.start_min)[i]
+                  if (b) {
+                    setEmployerId(b.employer_id)
+                    setProjectId(b.project_id)
+                    const pj = b.project_id != null ? projects.find((p) => p.id === b.project_id) : undefined
+                    setProjQuery(pj?.name ?? '')
+                  }
+                }
+              }}
+              style={{ ...timeField, fontSize: 15, cursor: 'pointer' }}
+            >
+              <option value="">Planblock wählen …</option>
               {[...plannedBlocks].sort((a, b) => a.start_min - b.start_min).map((b, i) => {
                 const proj = b.project_id != null ? projects.find((p) => p.id === b.project_id) : undefined
                 const emp = employers.find((e) => e.id === b.employer_id)
                 const name = proj?.name ?? emp?.name ?? 'Block'
-                const color = emp?.color || employerColor(b.employer_id)
-                const active = b.employer_id === employerId && b.project_id === projectId
                 return (
-                  <div key={i} onClick={() => { setEmployerId(b.employer_id); setProjectId(b.project_id) }} style={chip(active, color)}>
-                    <div style={{ width: 9, height: 9, borderRadius: 3, background: color }} />
-                    {name} <span style={{ color: 'var(--ink3)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{pad2(Math.floor(b.start_min / 60))}:{pad2(b.start_min % 60)}</span>
-                  </div>
+                  <option key={i} value={i}>
+                    {name} · {pad2(Math.floor(b.start_min / 60))}:{pad2(b.start_min % 60)}–{pad2(Math.floor(b.end_min / 60))}:{pad2(b.end_min % 60)}
+                  </option>
                 )
               })}
-            </div>
+            </select>
           </div>
         )}
 
@@ -728,7 +745,7 @@ function AddModal({ employers, projects, plannedBlocks, onClose, onCreated }: Ad
               const on = emp.id === employerId
               const color = emp.color || employerColor(emp.id)
               return (
-                <div key={emp.id} onClick={() => { setEmployerId(emp.id); if (emp.id !== employerId) setProjectId(null) }} style={chip(on, color)}>
+                <div key={emp.id} onClick={() => { setEmployerId(emp.id); if (emp.id !== employerId) { setProjectId(null); setProjQuery('') } }} style={chip(on, color)}>
                   <div style={{ fontSize: 15 }}>{emp.icon}</div>
                   {emp.name}
                 </div>
@@ -737,22 +754,37 @@ function AddModal({ employers, projects, plannedBlocks, onClose, onCreated }: Ad
           </div>
         </div>
 
-        {/* Projekt */}
+        {/* Projekt – Suchleiste mit gefilterter Liste */}
         {areaProjects.length > 0 && (
           <div style={{ marginTop: 16 }}>
             <div style={label}>Projekt <span style={{ fontWeight: 600, textTransform: 'none', letterSpacing: 0 }}>· optional</span></div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {areaProjects.map((p) => {
-                const on = p.id === projectId
-                const color = colorFor(p.employer_id)
-                return (
-                  <div key={p.id} onClick={() => setProjectId(on ? null : p.id)} style={chip(on, color)}>
-                    <div style={{ width: 9, height: 9, borderRadius: 3, background: color }} />
-                    {p.name}
-                  </div>
-                )
-              })}
-            </div>
+            <input
+              value={projQuery}
+              onFocus={() => setProjOpen(true)}
+              onChange={(e) => { setProjQuery(e.target.value); setProjectId(null); setProjOpen(true) }}
+              onBlur={() => window.setTimeout(() => setProjOpen(false), 150)}
+              placeholder="Projekt suchen oder wählen …"
+              style={{ ...timeField, fontSize: 15 }}
+            />
+            {projOpen && (() => {
+              const ql = projQuery.trim().toLowerCase()
+              const filtered = areaProjects.filter((p) => !ql || p.name.toLowerCase().includes(ql))
+              return (
+                <div className="no-scrollbar" style={{ marginTop: 8, maxHeight: 190, overflowY: 'auto', borderRadius: 14, border: '1px solid var(--border)', background: 'var(--glass)', display: 'flex', flexDirection: 'column', gap: 2, padding: 6 }}>
+                  {filtered.length === 0 && <div style={{ padding: '8px 10px', fontSize: 13, fontWeight: 600, color: 'var(--ink3)' }}>Kein passendes Projekt</div>}
+                  {filtered.map((p) => {
+                    const color = colorFor(p.employer_id)
+                    const on = p.id === projectId
+                    return (
+                      <div key={p.id} onMouseDown={(e) => { e.preventDefault(); setProjectId(p.id); setProjQuery(p.name); setProjOpen(false) }} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px', borderRadius: 10, cursor: 'pointer', background: on ? `color-mix(in srgb, ${color} 16%, transparent)` : 'transparent' }}>
+                        <div style={{ width: 9, height: 9, borderRadius: 3, background: color, flex: 'none' }} />
+                        <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 700, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })()}
           </div>
         )}
 
@@ -778,7 +810,7 @@ function AddModal({ employers, projects, plannedBlocks, onClose, onCreated }: Ad
 
         {error && <div style={{ fontSize: 13, fontWeight: 700, color: '#E5484D', marginTop: 14 }}>{error}</div>}
 
-        <div onClick={busy ? undefined : submit} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, padding: 15, borderRadius: 16, marginTop: 20, background: 'var(--accent, #22C55E)', color: '#fff', fontWeight: 800, fontSize: 16, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.7 : 1, boxShadow: '0 10px 24px rgba(34,197,94,0.4)' }}>
+        <div onClick={busy ? undefined : submit} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, padding: 15, borderRadius: 16, marginTop: 20, background: 'var(--accent, #22C55E)', color: '#fff', fontWeight: 800, fontSize: 16, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.7 : 1, boxShadow: '0 10px 24px color-mix(in srgb, var(--accent, #22C55E) 40%, transparent)' }}>
           {busy ? 'Speichern…' : mode === 'live' ? '▶ Timer starten' : 'Aktivität erfassen'}
         </div>
       </div>

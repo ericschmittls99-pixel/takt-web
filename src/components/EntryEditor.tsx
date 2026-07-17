@@ -149,7 +149,7 @@ export default function EntryEditor({
         <div style={{ display: 'flex', gap: 12, marginTop: 18 }}>
           <div onClick={busy ? undefined : del} style={{ padding: '13px 20px', borderRadius: 14, border: '1px solid var(--hair)', color: '#E5484D', fontWeight: 800, fontSize: 15, cursor: busy ? 'default' : 'pointer' }}>Löschen</div>
           <div style={{ flex: 1 }} />
-          <div onClick={busy ? undefined : save} style={{ padding: '13px 30px', borderRadius: 14, background: 'var(--accent, #22C55E)', color: '#fff', fontWeight: 800, fontSize: 15, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1, boxShadow: '0 8px 20px rgba(34,197,94,0.4)' }}>{busy ? 'Sichern…' : 'Sichern'}</div>
+          <div onClick={busy ? undefined : save} style={{ padding: '13px 30px', borderRadius: 14, background: 'var(--accent, #22C55E)', color: '#fff', fontWeight: 800, fontSize: 15, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1, boxShadow: '0 8px 20px color-mix(in srgb, var(--accent, #22C55E) 40%, transparent)' }}>{busy ? 'Sichern…' : 'Sichern'}</div>
         </div>
       </div>
     </div>

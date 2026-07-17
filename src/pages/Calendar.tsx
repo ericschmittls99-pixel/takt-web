@@ -268,7 +268,7 @@ function BlockEditor({
               <div onClick={busy ? undefined : onDelete} style={{ padding: '14px 20px', borderRadius: 14, border: '1px solid var(--hair)', color: '#E5484D', fontWeight: 800, fontSize: 15, cursor: busy ? 'default' : 'pointer' }}>Löschen</div>
             )}
             <div style={{ flex: 1 }} />
-            <div onClick={busy || draft.employerId === null ? undefined : onSave} style={{ padding: '14px 30px', borderRadius: 14, background: NEUTRAL, color: '#fff', fontWeight: 800, fontSize: 15, cursor: busy || draft.employerId === null ? 'default' : 'pointer', opacity: busy || draft.employerId === null ? 0.6 : 1, boxShadow: '0 8px 20px rgba(34,197,94,0.4)' }}>{busy ? 'Sichern…' : 'Sichern'}</div>
+            <div onClick={busy || draft.employerId === null ? undefined : onSave} style={{ padding: '14px 30px', borderRadius: 14, background: NEUTRAL, color: '#fff', fontWeight: 800, fontSize: 15, cursor: busy || draft.employerId === null ? 'default' : 'pointer', opacity: busy || draft.employerId === null ? 0.6 : 1, boxShadow: '0 8px 20px color-mix(in srgb, var(--accent, #22C55E) 40%, transparent)' }}>{busy ? 'Sichern…' : 'Sichern'}</div>
           </div>
         </div>
       </div>
@@ -1332,7 +1332,7 @@ export default function Calendar({ theme, onToggleTheme, onBack, onOpenTodos, on
                   setBusy(false)
                 }
               }}
-              style={{ padding: '10px 20px', borderRadius: 12, background: NEUTRAL, color: '#fff', fontWeight: 800, fontSize: 14, cursor: 'pointer', boxShadow: '0 6px 16px rgba(34,197,94,0.4)', whiteSpace: 'nowrap' }}
+              style={{ padding: '10px 20px', borderRadius: 12, background: NEUTRAL, color: '#fff', fontWeight: 800, fontSize: 14, cursor: 'pointer', boxShadow: '0 6px 16px color-mix(in srgb, var(--accent, #22C55E) 40%, transparent)', whiteSpace: 'nowrap' }}
             >
               Andere nach hinten schieben
             </div>
@@ -1468,7 +1468,7 @@ export default function Calendar({ theme, onToggleTheme, onBack, onOpenTodos, on
                   )
                 })()}
                 {absError && <div style={{ fontSize: 13, fontWeight: 700, color: '#E5484D' }}>{absError}</div>}
-                <div onClick={absBusy || !absDraft.start ? undefined : () => void saveAbsence()} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 14, borderRadius: 14, background: NEUTRAL, color: '#fff', fontWeight: 800, fontSize: 15, cursor: absBusy || !absDraft.start ? 'default' : 'pointer', opacity: absBusy || !absDraft.start ? 0.6 : 1, boxShadow: '0 8px 20px rgba(34,197,94,0.4)' }}>{absBusy ? 'Speichern…' : absDraft.id != null ? 'Änderungen speichern' : 'Abwesenheit hinzufügen'}</div>
+                <div onClick={absBusy || !absDraft.start ? undefined : () => void saveAbsence()} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 14, borderRadius: 14, background: NEUTRAL, color: '#fff', fontWeight: 800, fontSize: 15, cursor: absBusy || !absDraft.start ? 'default' : 'pointer', opacity: absBusy || !absDraft.start ? 0.6 : 1, boxShadow: '0 8px 20px color-mix(in srgb, var(--accent, #22C55E) 40%, transparent)' }}>{absBusy ? 'Speichern…' : absDraft.id != null ? 'Änderungen speichern' : 'Abwesenheit hinzufügen'}</div>
 
                 {absences.length > 0 && (
                   <div style={{ borderTop: '1px solid var(--hair)', paddingTop: 14 }}>
@@ -1533,7 +1533,7 @@ export default function Calendar({ theme, onToggleTheme, onBack, onOpenTodos, on
                     })}
                   </div>
                 </div>
-                <div onClick={exp.from && exp.to ? doExport : undefined} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, padding: 14, borderRadius: 14, background: NEUTRAL, color: '#fff', fontWeight: 800, fontSize: 15, cursor: exp.from && exp.to ? 'pointer' : 'default', opacity: exp.from && exp.to ? 1 : 0.6, boxShadow: '0 8px 20px rgba(34,197,94,0.4)' }}>
+                <div onClick={exp.from && exp.to ? doExport : undefined} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, padding: 14, borderRadius: 14, background: NEUTRAL, color: '#fff', fontWeight: 800, fontSize: 15, cursor: exp.from && exp.to ? 'pointer' : 'default', opacity: exp.from && exp.to ? 1 : 0.6, boxShadow: '0 8px 20px color-mix(in srgb, var(--accent, #22C55E) 40%, transparent)' }}>
                   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12" /><path d="M7 9l5-6 5 6" /><path d="M4 17v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" /></svg>
                   CSV herunterladen
                 </div>

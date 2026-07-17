@@ -4,6 +4,11 @@ import { api, type Employer, type Project, type Todo, type TodoPatch } from '../
 import { employerColor } from '../colors'
 import type { PageIntent } from '../App'
 
+// Farbe eines Bereichs: konfigurierte Bereichsfarbe, sonst Palette-Fallback.
+function areaColor(list: Employer[], id: number): string {
+  return list.find((e) => e.id === id)?.color || employerColor(id)
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -179,7 +184,7 @@ function TodoEditor({
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
               {employers.filter((emp) => emp.active === 1 || emp.id === state.employerId).map((emp) => {
                 const on = emp.id === state.employerId
-                const color = employerColor(emp.id)
+                const color = areaColor(employers, emp.id)
                 return (
                   <div key={emp.id} onClick={() => onChange({ employerId: on ? null : emp.id, projectId: null })} style={chip(on, color)}>
                     <div style={{ width: 9, height: 9, borderRadius: 3, background: color }} />
@@ -199,7 +204,7 @@ function TodoEditor({
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
                   {areaProjects.map((p) => {
                     const on = p.id === state.projectId
-                    const color = employerColor(p.employer_id)
+                    const color = areaColor(employers, p.employer_id)
                     return (
                       <div key={p.id} onClick={() => onChange({ projectId: on ? null : p.id })} style={chip(on, color)}>
                         <div style={{ width: 9, height: 9, borderRadius: 3, background: color }} />
@@ -229,7 +234,7 @@ function TodoEditor({
             <div style={{ flex: 1 }} />
             <div
               onClick={busy || state.title.trim().length === 0 ? undefined : onSave}
-              style={{ padding: '14px 30px', borderRadius: 14, background: NEUTRAL, color: '#fff', fontWeight: 800, fontSize: 15, cursor: busy || state.title.trim().length === 0 ? 'default' : 'pointer', opacity: busy || state.title.trim().length === 0 ? 0.6 : 1, boxShadow: '0 8px 20px rgba(34,197,94,0.4)' }}
+              style={{ padding: '14px 30px', borderRadius: 14, background: NEUTRAL, color: '#fff', fontWeight: 800, fontSize: 15, cursor: busy || state.title.trim().length === 0 ? 'default' : 'pointer', opacity: busy || state.title.trim().length === 0 ? 0.6 : 1, boxShadow: '0 8px 20px color-mix(in srgb, var(--accent, #22C55E) 40%, transparent)' }}
             >
               {busy ? 'Sichern…' : 'Sichern'}
             </div>
@@ -316,14 +321,14 @@ function InlineComposer({
       return employers
         .filter((e) => e.name.toLowerCase().includes(q))
         .slice(0, 6)
-        .map((e) => ({ key: `@${e.id}`, dot: employerColor(e.id), prefix: '@', label: e.name, pick: () => { setTitle(titleBase); setEmployerId(e.id); setProjectId(null); inputRef.current?.focus() } }))
+        .map((e) => ({ key: `@${e.id}`, dot: areaColor(employers, e.id), prefix: '@', label: e.name, pick: () => { setTitle(titleBase); setEmployerId(e.id); setProjectId(null); inputRef.current?.focus() } }))
     }
     if (tokenChar === '#') {
       const pool = employerId != null ? projects.filter((p) => p.employer_id === employerId) : projects
       return pool
         .filter((p) => p.name.toLowerCase().includes(q))
         .slice(0, 7)
-        .map((p) => ({ key: `#${p.id}`, dot: employerColor(p.employer_id), prefix: '#', label: p.name, pick: () => { setTitle(titleBase); setProjectId(p.id); setEmployerId(p.employer_id); inputRef.current?.focus() } }))
+        .map((p) => ({ key: `#${p.id}`, dot: areaColor(employers, p.employer_id), prefix: '#', label: p.name, pick: () => { setTitle(titleBase); setProjectId(p.id); setEmployerId(p.employer_id); inputRef.current?.focus() } }))
     }
     // '+': Frist
     const opts = [
@@ -437,7 +442,7 @@ function InlineComposer({
   return (
     <div style={{ position: 'relative', marginBottom: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '13px 14px', borderRadius: 14, background: 'var(--cell)', border: '1px solid var(--border)' }}>
-        <div style={{ width: 24, height: 24, borderRadius: 8, border: `2px dashed ${selEmp ? employerColor(selEmp.id) : 'var(--ink3)'}`, flex: 'none' }} />
+        <div style={{ width: 24, height: 24, borderRadius: 8, border: `2px dashed ${selEmp ? areaColor(employers, selEmp.id) : 'var(--ink3)'}`, flex: 'none' }} />
         <input
           ref={inputRef}
           value={title}
@@ -471,8 +476,8 @@ function InlineComposer({
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, paddingLeft: 2, position: 'relative' }}>
         {/* Bereich */}
         <div style={{ position: 'relative' }}>
-          <div onClick={() => setMenu(menu === 'area' ? null : 'area')} style={pill(selEmp != null, selEmp ? employerColor(selEmp.id) : undefined)}>
-            {selEmp && <div style={{ width: 8, height: 8, borderRadius: 3, background: employerColor(selEmp.id) }} />}
+          <div onClick={() => setMenu(menu === 'area' ? null : 'area')} style={pill(selEmp != null, selEmp ? areaColor(employers, selEmp.id) : undefined)}>
+            {selEmp && <div style={{ width: 8, height: 8, borderRadius: 3, background: areaColor(employers, selEmp.id) }} />}
             {selEmp ? selEmp.name : '＋ Bereich'}
           </div>
           {menu === 'area' && (
@@ -480,7 +485,7 @@ function InlineComposer({
               <div onClick={() => { setEmployerId(null); setProjectId(null); setMenu(null) }} style={{ ...menuItem, color: 'var(--ink3)' }}>Kein Bereich</div>
               {employers.map((e) => (
                 <div key={e.id} onClick={() => { setEmployerId(e.id); setProjectId(null); setMenu(null) }} style={menuItem}>
-                  <div style={{ width: 10, height: 10, borderRadius: 3, background: employerColor(e.id) }} />
+                  <div style={{ width: 10, height: 10, borderRadius: 3, background: areaColor(employers, e.id) }} />
                   {e.name}
                 </div>
               ))}
@@ -490,8 +495,8 @@ function InlineComposer({
 
         {/* Projekt */}
         <div style={{ position: 'relative' }}>
-          <div onClick={() => setMenu(menu === 'proj' ? null : 'proj')} style={pill(selProj != null, selProj ? employerColor(selProj.employer_id) : undefined)}>
-            {selProj && <div style={{ width: 8, height: 8, borderRadius: 3, background: employerColor(selProj.employer_id) }} />}
+          <div onClick={() => setMenu(menu === 'proj' ? null : 'proj')} style={pill(selProj != null, selProj ? areaColor(employers, selProj.employer_id) : undefined)}>
+            {selProj && <div style={{ width: 8, height: 8, borderRadius: 3, background: areaColor(employers, selProj.employer_id) }} />}
             {selProj ? selProj.name : '＋ Projekt'}
           </div>
           {menu === 'proj' && (
@@ -503,7 +508,7 @@ function InlineComposer({
                   <div onClick={() => { setProjectId(null); setMenu(null) }} style={{ ...menuItem, color: 'var(--ink3)' }}>Kein Projekt</div>
                   {areaProjects.map((p) => (
                     <div key={p.id} onClick={() => { setProjectId(p.id); setEmployerId(p.employer_id); setMenu(null) }} style={menuItem}>
-                      <div style={{ width: 10, height: 10, borderRadius: 3, background: employerColor(p.employer_id) }} />
+                      <div style={{ width: 10, height: 10, borderRadius: 3, background: areaColor(employers, p.employer_id) }} />
                       {p.name}
                     </div>
                   ))}
@@ -827,7 +832,7 @@ export default function Todos({ theme, onToggleTheme, onBack, onOpenCalendar, on
     if (groupBy === 'bereich') {
       for (const e of employers) {
         const items = bySort(open.filter((t) => t.employer_id === e.id))
-        if (items.length) out.push({ key: `emp-${e.id}`, label: e.name, accent: employerColor(e.id), items })
+        if (items.length) out.push({ key: `emp-${e.id}`, label: e.name, accent: areaColor(employers, e.id), items })
       }
       const none = bySort(open.filter((t) => t.employer_id == null))
       if (none.length) out.push({ key: 'emp-none', label: 'Ohne Bereich', accent: 'var(--ink3)', items: none })
@@ -853,7 +858,7 @@ export default function Todos({ theme, onToggleTheme, onBack, onOpenCalendar, on
   }, [filteredTodos, today, groupBy, employers])
 
   function todoColor(t: Todo): string {
-    return t.employer_id != null ? employerColor(t.employer_id) : NEUTRAL
+    return t.employer_id != null ? areaColor(employers, t.employer_id) : NEUTRAL
   }
 
   function todoSubName(t: Todo): string {
@@ -1189,7 +1194,7 @@ export default function Todos({ theme, onToggleTheme, onBack, onOpenCalendar, on
           </div>
           <div
             onClick={openNew}
-            style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '13px 20px', borderRadius: 16, background: NEUTRAL, color: '#fff', fontWeight: 800, fontSize: 15, cursor: 'pointer', boxShadow: '0 10px 24px rgba(34,197,94,0.4)' }}
+            style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '13px 20px', borderRadius: 16, background: NEUTRAL, color: '#fff', fontWeight: 800, fontSize: 15, cursor: 'pointer', boxShadow: '0 10px 24px color-mix(in srgb, var(--accent, #22C55E) 40%, transparent)' }}
           >
             <span style={{ fontSize: 19, lineHeight: 1 }}>+</span> Aufgabe
           </div>
@@ -1210,8 +1215,8 @@ export default function Todos({ theme, onToggleTheme, onBack, onOpenCalendar, on
 
           {/* Bereich-Filter */}
           <div style={{ position: 'relative' }}>
-            <div onClick={() => setFilterMenu(filterMenu === 'area' ? null : 'area')} style={fpill(filterArea !== 'all', selFilterEmp ? employerColor(selFilterEmp.id) : undefined)}>
-              {selFilterEmp && <div style={{ width: 9, height: 9, borderRadius: 3, background: employerColor(selFilterEmp.id) }} />}
+            <div onClick={() => setFilterMenu(filterMenu === 'area' ? null : 'area')} style={fpill(filterArea !== 'all', selFilterEmp ? areaColor(employers, selFilterEmp.id) : undefined)}>
+              {selFilterEmp && <div style={{ width: 9, height: 9, borderRadius: 3, background: areaColor(employers, selFilterEmp.id) }} />}
               {selFilterEmp ? selFilterEmp.name : 'Bereich: Alle'}
             </div>
             {filterMenu === 'area' && (
@@ -1219,7 +1224,7 @@ export default function Todos({ theme, onToggleTheme, onBack, onOpenCalendar, on
                 <div onClick={() => { setFilterArea('all'); setFilterMenu(null) }} style={{ ...fitem, color: filterArea === 'all' ? 'var(--ink)' : 'var(--ink2)' }}>Alle Bereiche</div>
                 {employers.map((e) => (
                   <div key={e.id} onClick={() => { setFilterArea(e.id); setFilterMenu(null) }} style={fitem}>
-                    <div style={{ width: 10, height: 10, borderRadius: 3, background: employerColor(e.id) }} />
+                    <div style={{ width: 10, height: 10, borderRadius: 3, background: areaColor(employers, e.id) }} />
                     {e.name}
                   </div>
                 ))}
