@@ -317,6 +317,14 @@ export default function Calendar({ theme, onToggleTheme, onBack, onOpenTodos, on
     else if (intent.action === 'filter-toggle') setFilterOpen((o) => !o)
     else if (intent.action === 'export-open') openExport()
     else if (intent.action === 'list-view') setCalView((v) => (v === 'list' ? 'week' : 'list'))
+    else if (intent.action === 'open-entry') {
+      setCalView('week')
+      if (intent.entry) setEntryPopup(intent.entry)
+    } else if (intent.action === 'open-planned' && intent.plan) {
+      const p = intent.plan
+      setCalView('planner')
+      openTemplateEditor({ key: `t${p.id}`, employer_id: p.employer_id, project_id: p.project_id, start_min: p.start_min, end_min: p.end_min, templateId: p.id, overrideId: null }, p.weekday)
+    }
     onIntentDone()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intent])

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, type Employer, type Entry, type Project, type Todo } from '../api'
+import { api, type Employer, type Entry, type PlannedBlock, type Project, type Todo } from '../api'
 import { COMMANDS, formatHotkey, type CommandId } from '../commands'
+
+type PlanRef = { id: number; weekday: number; employer_id: number; project_id: number | null; start_min: number; end_min: number }
 
 interface SpotlightProps {
   open: boolean
@@ -8,23 +10,30 @@ interface SpotlightProps {
   hotkeys: Record<string, string>
   onClose: () => void
   onRunCommand: (id: CommandId) => void
-  onOpenDay: (day: Date) => void
+  onOpenEntry: (entry: Entry) => void
+  onOpenPlanned: (block: PlanRef) => void
   onOpenTodos: () => void
 }
 
 type Row =
   | { kind: 'command'; key: string; id: CommandId; label: string; icon: string; hotkey: string }
-  | { kind: 'entry'; key: string; title: string; sub: string; day: Date }
+  | { kind: 'entry'; key: string; title: string; sub: string; entry: Entry }
+  | { kind: 'plan'; key: string; title: string; sub: string; plan: PlanRef }
   | { kind: 'todo'; key: string; title: string; sub: string }
 
+const WD = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa']
+function hm(min: number): string {
+  return `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`
+}
 function fmtDay(d: Date): string {
   return d.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-export default function Spotlight({ open, theme, hotkeys, onClose, onRunCommand, onOpenDay, onOpenTodos }: SpotlightProps) {
+export default function Spotlight({ open, theme, hotkeys, onClose, onRunCommand, onOpenEntry, onOpenPlanned, onOpenTodos }: SpotlightProps) {
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
   const [entries, setEntries] = useState<Entry[]>([])
+  const [planned, setPlanned] = useState<PlannedBlock[]>([])
   const [todos, setTodos] = useState<Todo[]>([])
   const [employers, setEmployers] = useState<Employer[]>([])
   const [projects, setProjects] = useState<Project[]>([])
@@ -36,12 +45,13 @@ export default function Spotlight({ open, theme, hotkeys, onClose, onRunCommand,
     setQuery('')
     setActive(0)
     const t = setTimeout(() => inputRef.current?.focus(), 20)
-    Promise.all([api.getEntries(), api.getTodos(), api.getEmployers(), api.getProjects()])
-      .then(([e, td, emp, proj]) => {
+    Promise.all([api.getEntries(), api.getTodos(), api.getEmployers(), api.getProjects(), api.getPlanned()])
+      .then(([e, td, emp, proj, pl]) => {
         setEntries(e)
         setTodos(td)
         setEmployers(emp)
         setProjects(proj)
+        setPlanned(pl)
       })
       .catch(() => {})
     return () => clearTimeout(t)
@@ -75,9 +85,24 @@ export default function Spotlight({ open, theme, hotkeys, onClose, onRunCommand,
           key: `e-${e.id}`,
           title: e.note?.trim() || parts || 'Eintrag',
           sub: `${fmtDay(day)}${parts && e.note?.trim() ? ` · ${parts}` : ''}`,
-          day,
+          entry: e,
         })
         if (++n >= 8) break
+      }
+      let p = 0
+      for (const b of planned) {
+        const emp = empName.get(b.employer_id) ?? ''
+        const proj = b.project_id != null ? projName.get(b.project_id) ?? '' : ''
+        if (!`${emp} ${proj}`.toLowerCase().includes(q)) continue
+        const parts = [emp, proj].filter(Boolean).join(' · ')
+        out.push({
+          kind: 'plan',
+          key: `p-${b.id}`,
+          title: proj || emp || 'Geplant',
+          sub: `${WD[b.weekday]} · ${hm(b.start_min)}–${hm(b.end_min)}${parts ? ` · ${parts}` : ''}`,
+          plan: { id: b.id, weekday: b.weekday, employer_id: b.employer_id, project_id: b.project_id, start_min: b.start_min, end_min: b.end_min },
+        })
+        if (++p >= 8) break
       }
       let m = 0
       for (const t of todos) {
@@ -92,7 +117,7 @@ export default function Spotlight({ open, theme, hotkeys, onClose, onRunCommand,
       }
     }
     return out
-  }, [query, entries, todos, empName, projName, hotkeys])
+  }, [query, entries, planned, todos, empName, projName, hotkeys])
 
   // Aktiven Index in gültigem Bereich halten.
   useEffect(() => {
@@ -105,7 +130,10 @@ export default function Spotlight({ open, theme, hotkeys, onClose, onRunCommand,
     if (row.kind === 'command') {
       onRunCommand(row.id)
     } else if (row.kind === 'entry') {
-      onOpenDay(row.day)
+      onOpenEntry(row.entry)
+      onClose()
+    } else if (row.kind === 'plan') {
+      onOpenPlanned(row.plan)
       onClose()
     } else {
       onOpenTodos()
@@ -182,7 +210,7 @@ export default function Spotlight({ open, theme, hotkeys, onClose, onRunCommand,
               setActive(0)
             }}
             onKeyDown={onKeyDown}
-            placeholder="Funktionen, Einträge oder To-Dos suchen …"
+            placeholder="Funktionen, Einträge, Geplantes oder To-Dos suchen …"
             style={{
               flex: 1,
               border: 'none',
@@ -208,7 +236,7 @@ export default function Spotlight({ open, theme, hotkeys, onClose, onRunCommand,
               lastKind = row.kind
               const isActive = i === active
               const header =
-                row.kind === 'command' ? 'Funktionen' : row.kind === 'entry' ? 'Einträge' : 'To-Dos'
+                row.kind === 'command' ? 'Funktionen' : row.kind === 'entry' ? 'Einträge' : row.kind === 'plan' ? 'Geplant' : 'To-Dos'
               return (
                 <div key={row.key}>
                   {showHeader && (
@@ -230,7 +258,7 @@ export default function Spotlight({ open, theme, hotkeys, onClose, onRunCommand,
                     }}
                   >
                     <div style={{ width: 30, height: 30, borderRadius: 9, display: 'grid', placeItems: 'center', fontSize: 16, background: 'var(--glass)', border: '1px solid var(--hair)', flex: 'none' }}>
-                      {row.kind === 'command' ? row.icon : row.kind === 'entry' ? '🗓️' : '📝'}
+                      {row.kind === 'command' ? row.icon : row.kind === 'entry' ? '🗓️' : row.kind === 'plan' ? '📐' : '📝'}
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>

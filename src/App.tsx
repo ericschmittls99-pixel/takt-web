@@ -5,7 +5,7 @@ import Calendar from './pages/Calendar'
 import Auswertung from './pages/Auswertung'
 import Verwalten from './pages/Verwalten'
 import Spotlight from './components/Spotlight'
-import { api, type AppSettings } from './api'
+import { api, type AppSettings, type Entry } from './api'
 import { COMMANDS, DEFAULT_HOTKEYS, eventToHotkey, type CommandId } from './commands'
 
 type View = 'mein-tag' | 'todos' | 'calendar' | 'auswertung' | 'verwalten'
@@ -17,7 +17,12 @@ const LEVELS: Level[] = ['tag', 'week', 'month', 'year', 'gesamt']
 
 // Seiten-interne Aktionen, die per Command ausgelöst werden. `nonce` erzwingt,
 // dass ein wiederholtes Auslösen derselben Aktion erneut greift.
-export type PageIntent = { action: 'new-entry' | 'toggle-tracking' | 'new-todo' | 'new-absence' | 'period-prev' | 'period-next' | 'planner-toggle' | 'plan-split' | 'level-up' | 'level-down' | 'filter-toggle' | 'export-open' | 'list-view'; nonce: number }
+export type PageIntent = {
+  action: 'new-entry' | 'toggle-tracking' | 'new-todo' | 'new-absence' | 'period-prev' | 'period-next' | 'planner-toggle' | 'plan-split' | 'level-up' | 'level-down' | 'filter-toggle' | 'export-open' | 'list-view' | 'open-entry' | 'open-planned'
+  nonce: number
+  entry?: Entry
+  plan?: { id: number; weekday: number; employer_id: number; project_id: number | null; start_min: number; end_min: number }
+}
 
 const DEFAULT_SETTINGS: AppSettings = {
   accent_color: '#22C55E',
@@ -282,9 +287,14 @@ export default function App() {
         hotkeys={hotkeys}
         onClose={() => setSpotlightOpen(false)}
         onRunCommand={runCommand}
-        onOpenDay={(day) => {
-          setSelectedDay(startOfDay(day))
-          setView('mein-tag')
+        onOpenEntry={(entry: Entry) => {
+          setSelectedDay(startOfDay(new Date(entry.start_ts)))
+          setView('calendar')
+          setIntent({ action: 'open-entry', entry, nonce: Date.now() })
+        }}
+        onOpenPlanned={(b) => {
+          setView('calendar')
+          setIntent({ action: 'open-planned', plan: b, nonce: Date.now() })
         }}
         onOpenTodos={() => setView('todos')}
       />
