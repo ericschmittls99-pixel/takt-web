@@ -28,3 +28,8 @@ dist/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Garmin (lokal): venv, Token-Cache und Roh-Samples nie committen
+garmin/venv/
+garmin/.garth/
+garmin/samples/
