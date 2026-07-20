@@ -76,6 +76,7 @@ export default function Verwalten({ theme, onToggleTheme, onBack, onOpenTodos, o
   const [aGoalMin, setAGoalMin] = useState(0)
   const [aHours, setAHours] = useState<number[]>([0, 0, 0, 0, 0, 0, 0]) // Minuten je weekday 0..6
   const [aActive, setAActive] = useState(true)
+  const [aSport, setASport] = useState(false) // Sport-Flag, nur bei kind='private'
   const [editErr, setEditErr] = useState<string | null>(null)
 
   // Emoji-Tabellen-Popup (merkt sich, welches Icon-Feld es setzt)
@@ -204,6 +205,7 @@ export default function Verwalten({ theme, onToggleTheme, onBack, onOpenTodos, o
     setAGoalMin(e.weekly_goal_min)
     setAHours(hoursFor(e.id))
     setAActive(e.active === 1)
+    setASport(e.is_sport === 1)
   }
 
   async function newArea() {
@@ -276,7 +278,7 @@ export default function Verwalten({ theme, onToggleTheme, onBack, onOpenTodos, o
     if (!name) return
     setBusy(true)
     try {
-      await api.updateEmployer(editArea.id, { name, color: aColor, icon: aIcon, kind: aKind, weekly_goal_min: Math.max(0, Math.round(aGoalMin)), active: aActive })
+      await api.updateEmployer(editArea.id, { name, color: aColor, icon: aIcon, kind: aKind, weekly_goal_min: Math.max(0, Math.round(aGoalMin)), active: aActive, is_sport: aKind === 'private' && aSport ? 1 : 0 })
       if (aKind === 'work') await api.setAreaHours(editArea.id, aHours.map((m) => Math.max(0, Math.round(m))))
       await reload()
       setEditArea(null)
@@ -706,6 +708,17 @@ export default function Verwalten({ theme, onToggleTheme, onBack, onOpenTodos, o
                     <div onClick={() => setAGoalMin((m) => m + 15)} style={{ width: 46, height: 48, borderRadius: 14, ...GLASS, display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--ink)', fontSize: 22, fontWeight: 700 }}>+</div>
                   </div>
                   <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink3)', marginTop: 8 }}>Private Bereiche laufen gegen ein Wochenziel — kein Minus, keine Feiertags-/Abwesenheitskürzung.</div>
+                </div>
+              )}
+              {aKind === 'private' && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--ink)' }}>Sport</div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink3)' }}>Speist den Puls-Tab (Workouts & Trainingshistorie). Verhält sich weiter wie ein privater Bereich.</div>
+                  </div>
+                  <div onClick={() => setASport((v) => !v)} style={{ width: 46, height: 26, borderRadius: 13, background: aSport ? 'var(--accent, #22C55E)' : 'var(--track)', position: 'relative', cursor: 'pointer', flex: 'none', transition: 'background .2s ease' }}>
+                    <div style={{ position: 'absolute', top: 2, left: aSport ? 22 : 2, width: 22, height: 22, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.25)', transition: 'left .2s ease' }} />
+                  </div>
                 </div>
               )}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>

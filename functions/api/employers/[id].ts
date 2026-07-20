@@ -8,6 +8,7 @@ interface PatchEmployerBody {
   weekly_goal_min?: unknown
   active?: unknown
   sort_order?: unknown
+  is_sport?: unknown
 }
 
 function parseId(raw: string | string[]): number | null {
@@ -20,9 +21,9 @@ export const onRequestPatch: PagesFunction<Env, 'id'> = async ({ request, env, p
   const id = parseId(params.id)
   if (id === null) return badRequest('Ungültige id')
 
-  const current = await env.DB.prepare('SELECT id FROM employers WHERE id = ?')
+  const current = await env.DB.prepare('SELECT id, kind FROM employers WHERE id = ?')
     .bind(id)
-    .first<{ id: number }>()
+    .first<{ id: number; kind: string }>()
   if (!current) return badRequest('Arbeitgeber nicht gefunden', 404)
 
   const body = (await request.json()) as PatchEmployerBody
@@ -56,6 +57,16 @@ export const onRequestPatch: PagesFunction<Env, 'id'> = async ({ request, env, p
   if (typeof body.sort_order === 'number' && Number.isFinite(body.sort_order)) {
     fields.push('sort_order = ?')
     values.push(Math.round(body.sort_order))
+  }
+  if (typeof body.is_sport === 'boolean' || body.is_sport === 0 || body.is_sport === 1) {
+    const wantSport = body.is_sport === true || body.is_sport === 1 ? 1 : 0
+    // Maßgeblich ist der Typ NACH diesem Patch (kind kann im selben Request geändert werden).
+    const effectiveKind = body.kind === 'work' || body.kind === 'private' ? body.kind : current.kind
+    if (wantSport === 1 && effectiveKind !== 'private') {
+      return badRequest('Sport (is_sport) ist nur für private Bereiche erlaubt')
+    }
+    fields.push('is_sport = ?')
+    values.push(wantSport)
   }
 
   if (fields.length === 0) return badRequest('Keine Felder zum Aktualisieren')

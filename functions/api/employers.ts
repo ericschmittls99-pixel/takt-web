@@ -2,7 +2,7 @@ import { badRequest, json, type Env } from '../_utils'
 
 export const onRequestGet: PagesFunction<Env> = async ({ env }) => {
   const { results } = await env.DB.prepare(
-    'SELECT id, name, color, icon, kind, weekly_goal_min, active, sort_order FROM employers ORDER BY sort_order, name',
+    'SELECT id, name, color, icon, kind, weekly_goal_min, active, sort_order, is_sport FROM employers ORDER BY sort_order, name',
   ).all()
   return json(results)
 }

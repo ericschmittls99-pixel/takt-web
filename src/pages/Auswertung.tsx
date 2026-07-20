@@ -127,6 +127,8 @@ export default function Auswertung({ theme, onToggleTheme, onBack, onOpenCalenda
   // "Gesamt" bezieht sich – wie der Wochen-Saldo – nur auf Arbeitsbereiche; private einzeln über die Chips.
   const includedEmp = areaFilter === 'all' ? employers.filter((e) => e.kind === 'work').map((e) => e.id) : [areaFilter]
 
+  // Auswertung zeigt ausschließlich Arbeitsbereiche; private/Sport-Bereiche leben im Puls-Tab.
+  const workEmployers = useMemo(() => employers.filter((e) => e.kind === 'work'), [employers])
   const employersById = useMemo(() => new Map(employers.map((e) => [e.id, e])), [employers])
   const colorFor = (empId: number): string => employersById.get(empId)?.color ?? employerColor(empId)
   const projectsById = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects])
@@ -341,7 +343,7 @@ export default function Auswertung({ theme, onToggleTheme, onBack, onOpenCalenda
             <div style={{ fontSize: 52, lineHeight: 0.9, fontWeight: 800, color: 'var(--ink3)', letterSpacing: '-2px', marginTop: 4 }}>{big}</div>
           </div>
           <div style={{ display: 'flex', padding: 4, gap: 3, borderRadius: 14, ...GLASS }}>
-            {[{ id: 'all' as const, name: 'Gesamt' }, ...employers.map((e) => ({ id: e.id, name: e.name }))].map((c) => (
+            {[{ id: 'all' as const, name: 'Gesamt' }, ...workEmployers.map((e) => ({ id: e.id, name: e.name }))].map((c) => (
               <div key={String(c.id)} onClick={() => setAreaFilter(c.id)} style={{ padding: '8px 15px', borderRadius: 10, fontSize: 13, fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap', color: areaFilter === c.id ? 'var(--ink)' : 'var(--ink3)', background: areaFilter === c.id ? 'var(--glass-strong)' : 'transparent', boxShadow: areaFilter === c.id ? '0 2px 8px var(--hair)' : 'none' }}>{c.name}</div>
             ))}
           </div>
@@ -407,7 +409,7 @@ export default function Auswertung({ theme, onToggleTheme, onBack, onOpenCalenda
             <div style={{ flex: 'none', borderRadius: 24, ...GLASS, boxShadow: '0 10px 30px var(--hair)', padding: '18px 22px' }}>
               <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '1.4px', textTransform: 'uppercase', color: 'var(--ink3)', marginBottom: 12 }}>{areaFilter === 'all' ? 'Bereiche' : 'Projekte'} · {big}</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {areaFilter === 'all' ? employers.map((e) => {
+                {areaFilter === 'all' ? workEmployers.map((e) => {
                   const color = colorFor(e.id)
                   const segs = subs.map((sp) => {
                     const ist = sumRange(sp.from, sp.to, [e.id], istDayEmp)

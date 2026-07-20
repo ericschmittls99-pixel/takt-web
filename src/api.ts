@@ -11,6 +11,7 @@ export interface Employer {
   weekly_goal_min: number
   active: number
   sort_order: number
+  is_sport: number
 }
 
 export interface AreaHours {
@@ -225,7 +226,7 @@ export const api = {
 
   updateEmployer: (
     id: number,
-    patch: { name?: string; color?: string; icon?: string; kind?: EmployerKind; weekly_goal_min?: number; active?: boolean; sort_order?: number },
+    patch: { name?: string; color?: string; icon?: string; kind?: EmployerKind; weekly_goal_min?: number; active?: boolean; sort_order?: number; is_sport?: 0 | 1 },
   ) =>
     request<Employer>(`/api/employers/${id}`, {
       method: 'PATCH',
