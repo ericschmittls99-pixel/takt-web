@@ -1176,15 +1176,16 @@ export default function MeinTag({ theme, onToggleTheme, onOpenTodos, onOpenCalen
     return Math.max(0, Math.min(sollDayTotalMin, elapsed))
   }, [cmpToday, sollDayTotalMin, now])
 
-  // Wochen-Konto (immer aktuelle KW): Füllstand Soll vs. gebucht, pro Tag segmentiert.
-  // Seite 0 = Gesamt, danach je Arbeitgeber. Basis ist heute, unabhängig vom gewählten Tag.
+  // Wochen-Konto: Füllstand Soll vs. gebucht der KW des ausgewählten Tages, pro Tag segmentiert.
+  // Seite 0 = Gesamt, danach je Arbeitgeber. Zeitpunkt-Bezug für „Soll bis jetzt" bleibt heute.
   const konto = useMemo(() => {
-    const today = startOfDay(now)
-    const monday = addDays(today, (now.getDay() + 6) % 7 === 0 ? 0 : -((now.getDay() + 6) % 7))
+    const anchor = startOfDay(selectedDay)
+    const monday = addDays(anchor, -((selectedDay.getDay() + 6) % 7))
     const sunday = addDays(monday, 6)
     const dayKeys = Array.from({ length: 7 }, (_, i) => dayKey(addDays(monday, i)))
+    const today = startOfDay(now)
     const todayKey = dayKey(today)
-    const todayIdx = dayKeys.indexOf(todayKey)
+    const selIdx = dayKeys.indexOf(dayKey(anchor))
     const kw = isoWeek(monday)
     const span = `${monday.getDate()}.–${sunday.getDate()}. ${MONTHS_SHORT[sunday.getMonth()]}`
 
@@ -1248,9 +1249,10 @@ export default function MeinTag({ theme, onToggleTheme, onOpenTodos, onOpenCalen
       if (sc.priv) {
         sollElapsed = sc.goal // privat: ganzes Wochenziel gegen bisher Erfasstes rechnen
       } else {
-        // Bis Ende des heutigen Tages: vergangene Tage + heute VOLLES Tages-Soll, künftige = 0.
+        // Soll bis heute: alle Wochentage ≤ heute (vergangene Woche = ganze Woche mit vollem
+        // Soll, künftige Woche = 0). Der heutige Tag zählt mit vollem Tages-Soll.
         for (let i = 0; i < 7; i++) {
-          if (todayIdx < 0 || i <= todayIdx) sollElapsed += sollDay[i]
+          if (dayKeys[i] <= todayKey) sollElapsed += sollDay[i]
         }
       }
       const days: KontoDaySeg[] = sollDay.map((s, i) => ({
@@ -1260,7 +1262,7 @@ export default function MeinTag({ theme, onToggleTheme, onOpenTodos, onOpenCalen
         color: sc.accent,
         bookedMin: bookedDay[i],
         sollMin: s,
-        isTod: i === todayIdx,
+        isTod: i === selIdx,
       }))
       return { label: sc.label, accent: sc.accent, saldoMin: bookedMin - sollElapsed, bookedMin, sollMin, days }
     })
@@ -1268,7 +1270,7 @@ export default function MeinTag({ theme, onToggleTheme, onOpenTodos, onOpenCalen
     const weekDays = Array.from({ length: 7 }, (_, i) => addDays(monday, i))
     return { pages, kw, span, weekDays }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entries, now, areaHours, employers, absences, settings.start_date])
+  }, [entries, now, selectedDay, areaHours, employers, absences, settings.start_date])
 
   function entryLabel(e: Entry): { name: string; sub: string; color: string } {
     const emp = employersById.get(e.employer_id)
