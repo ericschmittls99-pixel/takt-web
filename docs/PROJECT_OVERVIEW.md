@@ -93,14 +93,23 @@ Takt soll über reine Zeiterfassung hinauswachsen: **Zeit + Körper + Gesundheit
 Kontext**. Erster großer Baustein ist **Garmin**. Leitidee: *eine schönere, benutzer­freundlichere
 Oberfläche als Garmin Connect — aber verbunden mit meiner Zeiterfassung.*
 
-### 5.1 Inbox / Benachrichtigungs-Zentrale (übergreifendes Feature)
+### 5.1 Inbox — Benachrichtigungs-Popover (übergreifendes Feature)
 
-Die **Inbox** ist mehr als ein Garmin-Postfach — sie ist die zentrale **Benachrichtigungs- und
-Briefing-Zentrale** von Takt. Garmin-Workouts sind nur *eine* Quelle, die dort einspeist.
+Die **Inbox** ist die zentrale **Benachrichtigungs- und Briefing-Zentrale** von Takt.
+Garmin-Workouts sind nur *eine* Quelle, die dort einspeist.
+
+**Form (v1): ein Popover, kein eigener Tab und kein Slide-over.**
+- Verankert an einem **Icon im Header oben rechts**, mit **Badge** für die Zahl offener Aktionen.
+- ~**420px breit**, **max ~70vh** hoch, schließt bei **Außenklick/Esc**.
+- Einträge sind **kompakte Zeilen**. **Workout-Zeilen klappen inline auf** — die Zuordnung
+  (Bereich + Projekt + Notiz) passiert direkt im Popover. **Andere Typen sind reine Sprungziele**
+  (Klick → springt an den passenden Ort in der App).
+- Eine Vollansicht **„Alle anzeigen"** ist als **Wachstumspfad** dokumentiert, aber bewusst
+  **nicht Teil von v1**.
 
 Sie enthält zwei Arten von Einträgen:
 - **Aktionen** (zuordenbar/erledigbar): z. B. „Workout hochgeladen, noch nicht zugeordnet",
-  offene To-Dos mit Frist, fehlende Erfassungen.
+  überfällige To-Dos, fehlende Erfassungen.
 - **Briefings** (zeitgesteuerte Zusammenfassungen):
 
 **Morgen-Briefing (1× morgens)**
@@ -115,36 +124,62 @@ Sie enthält zwei Arten von Einträgen:
   jüngster Trainingslast und Schlaf.
 - offene Aktionen (z. B. **hochgeladenes, nicht zugeordnetes Workout**).
 
-**Umsetzung (Architektur-Implikationen)**
-- Neue Tabelle `inbox_items` (Typ `action`/`briefing`, `created_at`, `status`
-  `unread`/`read`/`done`/`dismissed`, `payload` als JSON, optionaler Bezug zu
-  `garmin_activities`/`todos`/`time_entries`).
-- **Zeitgesteuerte Generierung** über **Cloudflare Cron Triggers** (Worker läuft morgens/abends,
-  baut die Briefings aus D1 und legt `inbox_items` an). Briefings sind damit auch ohne offene App da.
-- Reihenfolge: Der Garmin-Sync sollte **vor** dem Abend-Briefing laufen, damit Health/Workout-Daten
+**Umsetzung — Inbox ohne Zustands-Duplikation (verbindlich)**
+- **Aktionen = Live-Query**, kein persistenter Zustand: offene Workouts (`activities.status =
+  'inbox'`) und überfällige To-Dos werden bei jedem Öffnen frisch abgefragt.
+- Die Tabelle **`inbox_items` speichert NUR Briefings** (nicht die Aktionen).
+- Der **Zuordnungsstatus lebt ausschließlich in `activities.status`** — es gibt keine zweite
+  Wahrheit über den Bearbeitungsstand.
+- **Zeitgesteuerte Generierung** der Briefings über **Cloudflare Cron Triggers** (Worker läuft
+  morgens/abends, baut die Briefings aus D1 und legt `inbox_items` an). Briefings sind damit auch
+  ohne offene App da. Reihenfolge: Garmin-Sync **vor** dem Abend-Briefing, damit Health/Workout-Daten
   aktuell sind.
-- **Benachrichtigung**: v1 = In-App-Inbox mit Badge; v2 = echte Push-Nachrichten über **Web Push
-  (PWA)** — die PWA-Basis (Manifest, Icons, `apple-mobile-web-app`) ist bereits vorhanden.
+- **Benachrichtigung**: v1 = In-App-Inbox mit Badge. **Web Push (PWA) rückt bewusst nach hinten**
+  — die In-App-Inbox reicht zunächst.
 - **Workout-Vorschlag**: zunächst einfache Heuristik (z. B. hohe Last / niedrige Body Battery →
   „leicht/Ruhe"; gute Erholung + länger kein intensives → „all-out"); später verfeinerbar.
 
-### 5.2 Garmin-Feature — Zielbild
+### 5.2 „Puls" — Tab für Körper & Training
 
-1. **Import**: Garmin-Daten (Workouts, Tageswerte, Schlaf, Stress, Gesundheit) werden nach
-   Takt importiert.
-2. **Postfach / Inbox**: Ein **abgeschlossenes Workout** erscheint in Takt in einem **Postfach**.
-3. **Zuordnung**: Ich ordne das Workout einem **Bereich + Projekt** zu — **mit Vorschlag von
-   Takt** (z. B. auf Basis früherer Zuordnungen oder des Aktivitätstyps). Ich ergänze **Notizen** etc.
-4. **Verknüpfung mit Zeiterfassung**: Nach der Zuordnung wird das Workout zu einer erfassten
-   **Aktivität** (taucht in Mein Tag / Kalender / Auswertung / Saldo auf) — **verbunden** mit
-   den Garmin-Rohdaten.
-5. **Deep-Dive-Auswertung**: Aus der Aktivität heraus öffnet ein **Pop-up** eine tiefergehende
-   Auswertung des Workouts (HF-Zonen, Distanz, Pace, Kalorien, Karte …).
-6. **Neuer Tab „Health/Fitness"**: Ein komplett **neuer Tab** mit **KPIs** zu Workouts, Stress,
-   Schlaf, Gesundheit — die freundlichere Garmin-Connect-Alternative, **gekoppelt an die
-   Zeiterfassung** (z. B. „Trainingszeit vs. Erholung", Belastung pro Bereich).
+Der neue Tab heißt **„Puls"** und ist die freundlichere, mit der Zeiterfassung gekoppelte
+Alternative zu Garmin Connect. Er hat **vier Unteransichten per Segment-Toggle**:
 
-### 5.3 Datenkategorien (alle vier gewünscht)
+- **Heute** — aktuelle Körperwerte (Body Battery, Stress, Schlaf, Schritte, Ruhepuls …).
+- **Workouts** — Trainingshistorie. Die Liste = **alle `time_entries` auf Sport-Bereichen**,
+  per LEFT JOIN mit `activities` für Metriken (siehe 5.4). Klick → Deep-Dive.
+- **Schlaf & Erholung** — Schlafphasen/-score, Body Battery, Stressverlauf.
+- **Trends** — Langzeitentwicklung (VO2max, Ruhepuls-Trend, Trainingslast, Gewicht …).
+
+Die **Auswertung** zeigt künftig **nur noch Arbeitsbereiche**; die private/sportliche Auswertung
+lebt in **Puls** (siehe 6.3).
+
+### 5.3 Sport als Bereichs-Flag (kein dritter Bereichstyp)
+
+Sport wird **nicht** als eigener Bereichstyp modelliert, sondern als **Flag** auf einem Bereich:
+`employers.is_sport`.
+- **Nur bei `kind = 'private'` setzbar** (Toggle in Verwalten).
+- Sport-Bereiche **verhalten sich weiter wie private Bereiche**: **% Wochenziel, kein Minus**,
+  sichtbar auf der 24-Stunden-Uhr in Mein Tag.
+- Zusätzlich **speisen sie den Puls-Tab** (nur Sport-Bereiche liefern die Workout-Historie).
+
+### 5.4 Workout-Erfassung, Zuordnung & Verknüpfung — Zielbild
+
+1. **Import (Garmin)**: Ein abgeschlossenes Workout kommt per Sync herein als `activities`-Zeile
+   mit `source = 'garmin'`, `status = 'inbox'` → erscheint als **Aktion in der Inbox**.
+2. **Zuordnung im Inbox-Popover**: Workout-Zeile klappt inline auf; ich weise **Bereich + Projekt**
+   zu — **mit Vorschlag von Takt** (häufigste Kombi für denselben Aktivitätstyp) — und ergänze eine
+   **Notiz**. Ergebnis: `status = 'assigned'` und ein **verknüpfter `time_entry`** entsteht
+   (taucht in Mein Tag / Kalender / Saldo auf).
+3. **Manuelle Erfassung**: Beim Erfassen auf einem **Sport-Bereich** klappt im bestehenden
+   **EntryEditor** ein optionaler **Metrik-Abschnitt** auf (Typ, Distanz, Kalorien, Ø/Max-HF) →
+   erzeugt eine `activities`-Zeile mit `source = 'manual'`, `status = 'assigned'`. Kein neues Formular.
+4. **Deep-Dive-Pop-up**: Aus jeder Workout-Aktivität öffnet ein Pop-up die tiefergehende Auswertung
+   (HF-Zonen, Splits, HF-Kurve …). Bei `source = 'manual'` sind die Werte **editierbar**.
+5. **Ankerprinzip**: Der **Zeiteintrag ist der Anker** — die bestehende Sport-Historie erscheint in
+   Puls **ohne Backfill**, weil die Workout-Liste über `time_entries` (Sport-Bereiche) LEFT JOIN
+   `activities` läuft.
+
+### 5.5 Datenkategorien (alle vier gewünscht)
 - **Aktivitäten/Workouts**: Typ, Dauer, Distanz, Kalorien, HF, Pace, Zeitpunkt.
 - **Schlaf & Erholung**: Phasen, Dauer, Body Battery, Stress, Score.
 - **Tageswerte**: Schritte, Herzfrequenz, Kalorien, aktive Minuten.
@@ -161,53 +196,94 @@ Cloudflare Pages Functions laufen auf der Worker-Runtime und können die Garmin-
 - Bibliothek **`garth`** (Garmin-SSO inkl. MFA, Token-Cache ~1 Jahr).
 - Login einmalig interaktiv; Token in `garmin/.garth/` (**gitignored**, kein Passwort im Repo).
 - Holt Aktivitäten/Tageswerte/Schlaf/Gesundheit für einen Datumsbereich.
-- Schreibt **idempotent** (`INSERT OR REPLACE`, natürliche Schlüssel wie `activity_id`,
-  `calendar_date`) in die Remote-D1 via `wrangler d1 execute --remote`.
+- Schreibt **idempotent** in die Remote-D1 via `wrangler d1 execute --remote`. Natürlicher
+  Sync-Schlüssel für Workouts ist **`activities.garmin_activity_id`** (UNIQUE), für Tageswerte
+  `calendar_date`.
+- **Re-Sync-Regel (verbindlich):** Der Sync überschreibt **niemals** `status`, `employer_id`,
+  `project_id`, `note`, `entry_id` — **nur Messfelder** (Dauer, Distanz, HF, Kalorien …).
 - Grauzone: inoffizieller Zugang zu **eigenen** Daten; kann brechen, wenn Garmin die
   internen Endpunkte ändert.
 
 **Schicht 2 — D1-Tabellen + Read-API** (Migrationen ab `0018`)
-- `garmin_activities` — `activity_id` (PK), `start_ts`, `type`, `name`, `duration_sec`,
-  `distance_m`, `calories`, `avg_hr`, `max_hr`, … plus **Zuordnungs-Felder**:
-  `status` (`inbox`/`assigned`/`ignored`), `employer_id`, `project_id`, `note`, `entry_id`
-  (Verknüpfung zur erzeugten `time_entries`-Zeile).
+- **`activities`** — **quellenneutral** (nicht `garmin_activities`). `id` (PK),
+  `source` (`'garmin'`/`'manual'`), **`garmin_activity_id` (UNIQUE, nullable)** als natürlicher
+  Sync-Schlüssel, `start_ts`, `type`, `name`, `duration_sec`, `distance_m`, `calories`,
+  `avg_hr`, `max_hr`, … plus **Zuordnungs-Felder**: `status` (`inbox`/`assigned`/`ignored`),
+  `employer_id`, `project_id`, `note`, `entry_id` (Verknüpfung zur `time_entries`-Zeile).
+- **`activity_details`** — `activity_id` (PK), `payload` (JSON: **HF-Zonen, Splits,
+  HF-Kurve auf ~200 Punkte downgesampelt**) für das Deep-Dive-Pop-up.
 - `garmin_daily` — `calendar_date` (PK), Schritte, Ruhepuls, Kalorien, aktive Minuten,
   Body Battery, Stress.
 - `garmin_sleep` — `calendar_date` (PK), gesamt/tief/leicht/REM/wach, Score.
 - `garmin_health` — `calendar_date` (PK), VO2max, Ruhepuls-Trend, Gewicht.
-- Endpunkte unter `functions/api/garmin/*` nach dem Muster von `entries.ts`
-  (GET mit optionalem Datumsfilter; POST/PATCH für Inbox-Zuordnung).
+- `inbox_items` — **nur Briefings** (Typ `briefing`, `created_at`, `status`, `payload` JSON).
+- `employers.is_sport` — neues Flag (siehe 5.3), nur bei `kind='private'`.
+- **Leserichtung Puls-Workoutliste:** **alle `time_entries` auf Sport-Bereichen**, LEFT JOIN
+  `activities` für Metriken. Der **Zeiteintrag ist der Anker** → bestehende Sport-Historie ist
+  ohne Backfill sichtbar; Workouts ohne Garmin-Daten erscheinen trotzdem.
+- Endpunkte unter `functions/api/*` nach dem Muster von `entries.ts`
+  (GET mit optionalem Datumsfilter; PATCH für Inbox-Zuordnung; GET für Deep-Dive-Details).
 
 **Schicht 3 — UI**
-- **Postfach/Inbox**: neue Workouts als zuordenbare Karten; „Bereich + Projekt zuweisen"
-  mit **Vorschlag** (Heuristik: letzte Zuordnung für denselben Aktivitätstyp) + Notizfeld.
+- **Inbox-Popover** (Header oben rechts, siehe 5.1): Workout-Zeilen klappen inline auf,
+  „Bereich + Projekt zuweisen" mit **Vorschlag** + Notizfeld; andere Zeilen sind Sprungziele.
 - Beim Zuweisen entsteht ein `time_entries`-Eintrag (Saldo/Kalender/Mein Tag) mit Rückverweis
-  auf die Garmin-Aktivität.
-- **Deep-Dive-Pop-up** an der Aktivität (HF-Zonen, Distanz, Pace, Kalorien …).
-- **Neuer Tab „Health/Fitness"**: KPI-Dashboard (Workouts, Stress, Schlaf, Gesundheit),
-  im Glass-Stil, verbunden mit der Zeiterfassung. Integration in Nav + `commands.ts` + Spotlight.
+  über `activities.entry_id`.
+- **Manuelle Sport-Erfassung im bestehenden `EntryEditor`**: bei Sport-Bereich optionaler
+  Metrik-Abschnitt (Typ, Distanz, Kalorien, Ø/Max-HF) → `activities`-Zeile `source='manual'`,
+  `status='assigned'`. Kein neues Formular.
+- **Deep-Dive-Pop-up** an der Aktivität (HF-Zonen, Splits, HF-Kurve …); bei `source='manual'`
+  editierbar.
+- **Tab „Puls"** mit Segment-Toggle (Heute / Workouts / Schlaf & Erholung / Trends),
+  im Glass-Stil. Integration in Nav + `commands.ts` + Spotlight.
 
-### 6.1 Zuordnungs-/Vorschlagslogik (Kern des „Postfach"-Erlebnisses)
-- Beim Import landet jedes neue Workout mit `status='inbox'`.
+### 6.1 Zuordnungs-/Vorschlagslogik
+- Beim Import landet jedes neue Garmin-Workout als `activities`-Zeile mit `status='inbox'`.
 - **Vorschlag** = häufigste `(employer_id, project_id)`-Kombination früherer Workouts desselben
-  Garmin-Typs (Fallback: konfigurierbares Typ→Bereich-Mapping).
+  Aktivitätstyps (Fallback: konfigurierbares Typ→Bereich-Mapping).
 - Nutzer bestätigt/ändert Bereich+Projekt, ergänzt Notiz → `status='assigned'`, `time_entry`
   wird erzeugt/verknüpft. „Ignorieren" → `status='ignored'` (kein Saldo-Effekt).
+
+### 6.2 Lösch- & Verknüpfungsregeln (verbindlich)
+- **Re-Sync** überschreibt **nie** `status`, `employer_id`, `project_id`, `note`, `entry_id`
+  (nur Messfelder).
+- **Löschen eines `time_entry` mit Garmin-Aktivität** → die Aktivität wird **getrennt, nicht
+  gelöscht**: `entry_id = NULL`, `status = 'inbox'` (landet wieder in der Inbox).
+- **Löschen eines `time_entry` mit manueller Aktivität** → die `activities`-Zeile wird
+  **mitgelöscht** (sie hat keine externe Quelle).
+
+### 6.3 Auswirkungen auf bestehende Screens
+- **Auswertung**: zeigt künftig **nur Arbeitsbereiche**; private/Sport-Auswertung wandert in
+  **Puls**.
+- **Mein Tag**: Donut-Widgets bleiben **unverändert** (Dopplung mit Puls ist gewollt);
+  neu: **Puls-Icon** an Garmin-verknüpften Aktivitäten (öffnet Deep-Dive), kompakte
+  **„Körper heute"-Karte** (nur wenn Daten vorhanden), **Inbox-Badge** im Header.
+- **Design-Hinweis**: Mein Tag und Auswertung werden **nicht** über Claude Design neu gestaltet;
+  die neuen Elemente werden im bestehenden Glass-Stil ergänzt.
 
 ---
 
 ## 7. Roadmap (vorgeschlagen, bottom-up & testbar)
 
 1. **Sync-Fundament**: `garth` in lokalem venv, Login-Test, Roh-JSON sichten → Feldauswahl fixieren.
-2. **Schema + Sync-Write**: Tabellen `0018+`, Schreiben zuerst gegen **lokale** D1.
-3. **Read-API + Inbox-UI**: Endpunkte + Postfach mit Zuordnung/Vorschlag (`typecheck` grün).
-4. **Verknüpfung**: Zuordnung erzeugt `time_entry`; Deep-Dive-Pop-up.
-5. **Health/Fitness-Tab**: KPI-Dashboard, Nav/Commands/Spotlight-Integration.
-6. **Inbox/Briefings**: Tabelle `inbox_items` + In-App-Inbox mit Badge; Morgen-/Abend-Briefing
-   zunächst on-demand generierbar, dann per **Cloudflare Cron Trigger** automatisiert.
-7. **Produktion** (nur mit ausdrücklicher Freigabe): Remote-Migration + Sync + Deploy.
-8. **Später**: Web-Push (PWA) für echte Benachrichtigungen, Automatisierung des Syncs
-   (Cron/Launchd), Mobile-Optimierung, Design-Feinschliff über den Claude-Design-Master.
+2. **Schema + Sync-Write**: Tabellen `0018+` (`activities` inkl. `garmin_activity_id` UNIQUE,
+   `activity_details`, `garmin_daily/sleep/health`, `inbox_items`, `employers.is_sport`),
+   Schreiben zuerst gegen **lokale** D1; Re-Sync-Regel (nur Messfelder) umsetzen.
+3. **Sport-Flag + manuelle Erfassung**: `is_sport`-Toggle in Verwalten; `EntryEditor` um den
+   optionalen Metrik-Abschnitt erweitern (`source='manual'`). Lösch-/Verknüpfungsregeln (6.2).
+4. **Read-API + Inbox-Popover**: Endpunkte + Header-Popover mit Live-Aktionen (Inbox-Query) +
+   Briefings; inline-Zuordnung mit Vorschlag; `time_entry`-Verknüpfung (`typecheck` grün).
+5. **Deep-Dive-Pop-up**: `activity_details`-Payload rendern (HF-Zonen/Splits/HF-Kurve),
+   editierbar bei `source='manual'`.
+6. **Puls-Tab**: Segment-Toggle (Heute / Workouts / Schlaf & Erholung / Trends),
+   Nav/Commands/Spotlight-Integration; Auswertung auf Arbeitsbereiche reduzieren; Mein-Tag-Ergänzungen
+   (Puls-Icon, „Körper heute", Inbox-Badge).
+7. **Briefings**: Morgen-/Abend-Briefing zunächst on-demand generierbar, dann per
+   **Cloudflare Cron Trigger** automatisiert (Sync vor Abend-Briefing).
+8. **Produktion** (nur mit ausdrücklicher Freigabe): Remote-Migration + Sync + Deploy.
+9. **Später**: „Alle anzeigen"-Vollansicht der Inbox, **Web Push (PWA)** für echte
+   Benachrichtigungen, Automatisierung des Syncs (Cron/Launchd), Mobile-Optimierung,
+   Design-Feinschliff über den Claude-Design-Master.
 
 ---
 
