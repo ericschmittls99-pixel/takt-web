@@ -1,0 +1,4 @@
+# Garmin-Sync (lokal). Pin bewusst auf 0.6.3 — 0.7.0+ liefert 429 beim Login (siehe WP0).
+# Setup:  /usr/local/bin/python3.12 -m venv garmin/venv
+#         garmin/venv/bin/pip install -r garmin/requirements.txt
+garth==0.6.3

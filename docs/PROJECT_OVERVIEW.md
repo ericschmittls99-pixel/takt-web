@@ -261,6 +261,69 @@ Cloudflare Pages Functions laufen auf der Worker-Runtime und können die Garmin-
 - **Design-Hinweis**: Mein Tag und Auswertung werden **nicht** über Claude Design neu gestaltet;
   die neuen Elemente werden im bestehenden Glass-Stil ergänzt.
 
+### 6.4 Feldspezifikation (verifiziert an Garmin-Rohdaten in WP0)
+
+Grundlage: `garmin/explore.py` hat 14 Tage Roh-JSON gezogen (`garmin/samples/`, gitignored).
+Konvention: **Zeit lokal** (`startTimeLocal`) speichern, passend zur lokalen Leseweise der App.
+Sync-Bibliothek für WP1 auf **`garth==0.6.3`** gepinnt (0.7+ liefert 429 beim Login).
+**NULL-Regel:** Alle Garmin-abgeleiteten Kennzahlspalten sind **NULL-fähig** und tragen **keine
+bedeutungstragenden Defaults** (fehlender Wert = `NULL`, nicht 0). Ausnahme: `activities.status`
+(Default `'inbox'`) und `source`/Schlüssel.
+
+**Prinzip:** `activities`/`*_daily`/`*_sleep` tragen die **abfragbaren Kennzahlen als Spalten**;
+granulare Deep-Dive-Daten (Kurven, Splits, Übungssätze) liegen als **JSON-Payload** in
+`activity_details` bzw. der `curves`-Spalte von `garmin_sleep`.
+
+**`activities`** (Quelle: `activitylist-service/.../activities`, Zuordnung siehe 6.1)
+- `id` (intern, PK) · `source` (`garmin`/`manual`) · `garmin_activity_id` (UNIQUE, nullable ← `activityId`)
+- `start_ts` ← `startTimeLocal` · `type` ← `activityType.typeKey` · `name` ← `activityName`
+- `duration_sec` ← `duration` · `distance_m` ← `distance` (0/NULL bei Kraft) · `calories` ← `calories`
+- `avg_hr` ← `averageHR` · `max_hr` ← `maxHR` · `elevation_gain_m` ← `elevationGain` (Lauf/Rad)
+- Trainings-Kennzahlen: `training_load` ← `activityTrainingLoad` · `aerobic_te` ← `aerobicTrainingEffect`
+  · `anaerobic_te` ← `anaerobicTrainingEffect` · `moderate_min`/`vigorous_min` ← `*IntensityMinutes`
+  · `vo2max` ← `vO2MaxValue` (nur Lauf/Rad; Quelle für Puls-Trend, siehe `garmin_health`)
+- Kraft-Summe: `total_reps` ← `totalReps` · `total_sets` ← `totalSets`
+- Zuordnung: `status` (`inbox`/`assigned`/`ignored`) · `employer_id` · `project_id` · `note` · `entry_id`
+
+**`activity_details`** (Quelle: `activity-service/activity/{id}/details?maxChartSize=200`)
+- `activity_id` (PK → `activities.id`) · `payload` (JSON):
+  - `hr_curve`: `[{t, v}]` ~200 Punkte (aus `directHeartRate` + `directTimestamp`; Lauf **und** Kraft)
+  - `hr_zones_sec`: `{z1…z5}` ← `hrTimeInZone_1..5`
+  - `splits`: ← `splitSummaries` (Lauf/Rad)
+  - `exercise_sets`: ← `summarizedExerciseSets` (Kraft): `[{category, subCategory, reps, sets, maxWeight, volume, duration}]`
+  - editierbar bei `source='manual'`
+
+**`garmin_daily`** (Quelle: `usersummary-service/usersummary/daily`, PK `calendar_date`)
+- `steps` ← `totalSteps` · `step_goal` ← `dailyStepGoal`
+- `resting_hr` ← `restingHeartRate` · `resting_hr_7d_avg` ← `lastSevenDaysAvgRestingHeartRate`
+  · `min_hr`/`max_hr` ← `minHeartRate`/`maxHeartRate`
+- `calories_total`/`calories_active`/`calories_bmr` ← `total`/`active`/`bmrKilocalories`
+- `intensity_moderate_min`/`intensity_vigorous_min` ← `*IntensityMinutes`
+- `stress_avg` ← `averageStressLevel` · `stress_max` ← `maxStressLevel`
+- Body Battery: `bb_high`/`bb_low`/`bb_wake`/`bb_charged`/`bb_drained`
+  ← `bodyBatteryHighest`/`Lowest`/`AtWakeTime`/`Charged`/`DrainedValue`
+- `spo2_avg` ← `averageSpo2` · `respiration_waking_avg` ← `avgWakingRespirationValue`
+  · `floors_ascended` ← `floorsAscended` · `sleeping_sec` ← `sleepingSeconds`
+
+**`garmin_sleep`** (Quelle: `wellness-service/wellness/dailySleepData`, PK `calendar_date`)
+- Summary aus `dailySleepDTO`: `total_sec` ← `sleepTimeSeconds` · `deep_sec`/`light_sec`/`rem_sec`/`awake_sec`
+  · `score` ← `sleepScores.overall.value` · `score_qualifier` ← `sleepScores.overall.qualifierKey`
+  · `avg_stress` ← `avgSleepStress` · `avg_hr` ← `avgHeartRate` · `avg_respiration` ← `averageRespirationValue`
+  · `avg_spo2` ← `averageSpO2Value`
+- Top-Level: `hrv_overnight_avg` ← `avgOvernightHrv` · `hrv_status` ← `hrvStatus`
+  · `body_battery_change` ← `bodyBatteryChange` · `resting_hr` ← `restingHeartRate` · `restless_moments` ← `restlessMomentsCount`
+- `curves` (JSON, **15-Min-Raster**, ~5,5 KB/Nacht): `{ hr, stress, body_battery, movement }` je `[{t, v}]`
+  (aus `sleepHeartRate`/`sleepStress`/`sleepBodyBattery`/`sleepMovement.activityLevel`) + `levels` (Phasen 1:1 aus `sleepLevels`)
+- **Verworfen:** SpO2-Epochen- und Roh-Bewegungs-Arrays (nur deren Summary bleibt) → statt ~172 KB nur ~5,5 KB/Nacht
+
+**`garmin_health`** (PK `calendar_date`) — bewusst schlank (keine Dopplung mit `garmin_daily`)
+- `vo2max` ← letzter bekannter `vO2MaxValue` aus `activities` (fortgeschrieben)
+- `weight_g` · `bmi` · `body_fat` (nullable, Quelle `weight-service`; aktuell **leer** — Spalten für später)
+- Ruhepuls-**Trend** wird aus `garmin_daily.resting_hr` gelesen (nicht dupliziert)
+
+**Offene Nachrüstung (später, nicht WP1):** täglicher VO2max-Endpunkt für lückenlose Werte
+(in WP0 fehlgeschlagen; vorerst Aktivitäts-Quelle).
+
 ---
 
 ## 7. Roadmap (vorgeschlagen, bottom-up & testbar)
