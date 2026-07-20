@@ -702,10 +702,10 @@ function AddModal({ employers, projects, plannedBlocks, onClose, onCreated }: Ad
         </div>
         <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink2)', marginTop: 2 }}>{mode === 'live' ? 'Timer jetzt starten' : 'Zeiten manuell erfassen'}</div>
 
-        {/* Planblock übernehmen (nur Bereich & Projekt; Uhrzeit bleibt aktuell) */}
+        {/* Planblock übernehmen: Bereich, Projekt & Zeitfenster in die Erfassen-Felder */}
         {plannedBlocks.length > 0 && (
           <div style={{ marginTop: 16 }}>
-            <div style={label}>Planblock übernehmen <span style={{ fontWeight: 600, textTransform: 'none', letterSpacing: 0 }}>· Bereich &amp; Projekt</span></div>
+            <div style={label}>Planblock übernehmen <span style={{ fontWeight: 600, textTransform: 'none', letterSpacing: 0 }}>· Bereich, Projekt &amp; Zeit</span></div>
             <input
               value={planQuery}
               onFocus={() => setPlanOpen(true)}
@@ -728,7 +728,7 @@ function AddModal({ employers, projects, plannedBlocks, onClose, onCreated }: Ad
                 <div className="no-scrollbar" style={{ marginTop: 8, maxHeight: 190, overflowY: 'auto', borderRadius: 14, border: '1px solid var(--border)', background: 'var(--glass)', display: 'flex', flexDirection: 'column', gap: 2, padding: 6 }}>
                   {items.length === 0 && <div style={{ padding: '8px 10px', fontSize: 13, fontWeight: 600, color: 'var(--ink3)' }}>Kein passender Planblock</div>}
                   {items.map((it, i) => (
-                    <div key={i} onMouseDown={(e) => { e.preventDefault(); setEmployerId(it.b.employer_id); setProjectId(it.b.project_id); setProjQuery(it.projName); setPlanQuery(`${it.name} · ${it.time}`); setPlanOpen(false) }} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px', borderRadius: 10, cursor: 'pointer' }}>
+                    <div key={i} onMouseDown={(e) => { e.preventDefault(); setMode('log'); setEmployerId(it.b.employer_id); setProjectId(it.b.project_id); setProjQuery(it.projName); setStartTime(`${pad2(Math.floor(it.b.start_min / 60))}:${pad2(it.b.start_min % 60)}`); setEndTime(`${pad2(Math.floor(it.b.end_min / 60))}:${pad2(it.b.end_min % 60)}`); setPlanQuery(`${it.name} · ${it.time}`); setPlanOpen(false) }} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px', borderRadius: 10, cursor: 'pointer' }}>
                       <div style={{ width: 9, height: 9, borderRadius: 3, background: it.color, flex: 'none' }} />
                       <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 700, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.name}</div>
                       <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink3)', fontVariantNumeric: 'tabular-nums' }}>{it.time}</div>

@@ -27,6 +27,9 @@ function isoFromDayTime(day: Date, hhmm: string): string {
   d.setHours(h || 0, m || 0, 0, 0)
   return d.toISOString()
 }
+function dayKey(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+}
 
 const label: CSSProperties = { fontSize: 12, fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--ink3)', marginBottom: 8 }
 const timeField: CSSProperties = { width: '100%', boxSizing: 'border-box', borderRadius: 14, border: '1px solid var(--hair)', background: 'var(--glass)', padding: '12px 14px', fontSize: 16, fontWeight: 700, color: 'var(--ink)', fontFamily: 'inherit', outline: 'none' }
@@ -48,7 +51,7 @@ export default function EntryEditor({
   onClose: () => void
   onSaved: () => void
 }) {
-  const day = startOfDay(new Date(entry.start_ts))
+  const [dateStr, setDateStr] = useState(() => dayKey(new Date(entry.start_ts)))
   const [employerId, setEmployerId] = useState<number>(entry.employer_id)
   const [projectId, setProjectId] = useState<number | null>(entry.project_id)
   const [start, setStart] = useState(fmtClock(new Date(entry.start_ts)))
@@ -63,6 +66,7 @@ export default function EntryEditor({
   async function save() {
     setBusy(true)
     try {
+      const day = new Date(`${dateStr}T00:00:00`)
       await api.updateEntry(entry.id, {
         employer_id: employerId,
         project_id: projectId,
@@ -96,7 +100,7 @@ export default function EntryEditor({
           <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--ink)' }}>Aktivität bearbeiten</div>
           <div onClick={onClose} style={{ width: 36, height: 36, borderRadius: 12, ...GLASS, display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--ink2)', fontSize: 16, fontWeight: 600 }}>✕</div>
         </div>
-        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink2)', marginTop: 2 }}>{day.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink2)', marginTop: 2 }}>{new Date(`${dateStr}T00:00:00`).toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
 
         {/* Bereich */}
         <div style={{ marginTop: 16 }}>
@@ -138,6 +142,12 @@ export default function EntryEditor({
         <div style={{ marginTop: 16 }}>
           <div style={label}>Notiz</div>
           <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Notiz" style={{ width: '100%', boxSizing: 'border-box', borderRadius: 14, border: '1px solid var(--hair)', background: 'var(--glass)', padding: '12px 14px', fontSize: 15, fontWeight: 600, color: 'var(--ink)', fontFamily: 'inherit', outline: 'none' }} />
+        </div>
+
+        {/* Datum */}
+        <div style={{ marginTop: 16 }}>
+          <div style={label}>Datum</div>
+          <input type="date" lang="de-DE" value={dateStr} onChange={(e) => setDateStr(e.target.value)} style={{ ...timeField, fontSize: 15 }} />
         </div>
 
         {/* Start / Ende */}
