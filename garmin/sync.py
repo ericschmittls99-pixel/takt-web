@@ -28,6 +28,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -319,6 +320,10 @@ def map_sleep(sd: dict) -> tuple[str, dict, dict] | None:
         "body_battery_change": g(sd, "bodyBatteryChange"),
         "resting_hr": g(sd, "restingHeartRate"),
         "restless_moments": g(sd, "restlessMomentsCount"),
+        # Sleep Need (Sleep Coach) — im selben DTO.
+        "sleep_need_baseline": (dto.get("sleepNeed") or {}).get("baseline"),
+        "sleep_need_actual": (dto.get("sleepNeed") or {}).get("actual"),
+        "sleep_need_feedback": (dto.get("sleepNeed") or {}).get("feedback"),
     }
     curves = {
         "hr": downsample(sd.get("sleepHeartRate"), "startGMT", "value"),
@@ -434,6 +439,132 @@ def sync_health(dn: str, days: int, activities: list[dict], stmts: list[str], su
     summary["garmin_health"] = (new, upd)
 
 
+_score_fails: dict = {}
+SCORE_THROTTLE = 0.15  # kurze Pause vor jedem Score-Call (schont den Server)
+SCORE_FIELDS = [
+    "training_readiness_score", "tr_level", "tr_recovery_time", "tr_acute_load", "tr_acwr_percent",
+    "training_status_code", "ts_weekly_load", "ts_load_balance",
+    "endurance_score", "hill_score", "hill_strength", "hill_endurance",
+    "vo2max", "fitness_age", "fitness_age_chronological",
+    "race_5k_sec", "race_10k_sec", "race_hm_sec", "race_m_sec",
+]
+
+
+def api_retry(path: str, **kw):
+    """Gedrosselter, 429-toleranter Call: bei Rate-Limit warten und weiter (nicht abbrechen).
+    Andere Fehler werden geworfen (vom Aufrufer behandelt)."""
+    for attempt in range(6):
+        try:
+            time.sleep(SCORE_THROTTLE)
+            return api(path, **kw)
+        except Exception as e:  # noqa: BLE001
+            if ("429" in str(e) or "Too Many Requests" in str(e)) and attempt < 5:
+                wait = 20 * (attempt + 1)
+                warn(f"429 (Rate-Limit) — warte {wait}s und weiter (Versuch {attempt + 1}/5)")
+                time.sleep(wait)
+                continue
+            raise
+
+
+def safe_api(label: str, path: str, **kw):
+    """Wie api_retry(), faengt aber Nicht-429-Fehler ab (zaehlt sie) und gibt None zurueck —
+    fuer Score-Endpunkte, die an einzelnen Tagen fehlen duerfen."""
+    try:
+        return api_retry(path, **kw)
+    except Exception:  # noqa: BLE001
+        _score_fails[label] = _score_fails.get(label, 0) + 1
+        return None
+
+
+def _first_val(m):
+    if isinstance(m, dict):
+        for v in m.values():
+            return v
+    return None
+
+
+def sync_scores(dn: str, days: int, stmts: list[str], summary: dict) -> None:
+    dates = dates_desc(days)
+    start, end = dates[-1], dates[0]
+
+    # Range-Quellen (je ein Call, liefern Listen).
+    # VO2max: maxmet liefert nur Messtage -> letzten Wert fortschreiben (lückenlos, auch an
+    # Nicht-Trainingstagen). Wider-Range als Seed, damit auch Tage vor der ersten Messung im
+    # Fenster einen Wert bekommen.
+    vo2_measured: list = []
+    start_wide = (date.today() - timedelta(days=days + 120)).isoformat()
+    try:
+        for e in (api_retry(f"/metrics-service/metrics/maxmet/daily/{start_wide}/{end}") or []):
+            gen = (e or {}).get("generic") or {}
+            if gen.get("calendarDate") and gen.get("vo2MaxValue") is not None:
+                vo2_measured.append((str(gen["calendarDate"])[:10], gen.get("vo2MaxValue")))
+    except Exception as e:  # noqa: BLE001
+        warn(f"VO2max (maxmet/daily) nicht abrufbar: {e}")
+    vo2_measured.sort()
+
+    def vo2_for(day: str):
+        last = None
+        for cd, v in vo2_measured:
+            if cd <= day:
+                last = v
+            else:
+                break
+        return last
+    race_map: dict = {}
+    try:
+        for e in (api_retry(f"/metrics-service/metrics/racepredictions/daily/{dn}", params={"fromCalendarDate": start, "toCalendarDate": end}) or []):
+            if (e or {}).get("calendarDate"):
+                race_map[str(e["calendarDate"])[:10]] = e
+    except Exception as e:  # noqa: BLE001
+        warn(f"Race Predictions (Range) nicht abrufbar: {e}")
+
+    have = existing_keys("garmin_scores", "calendar_date")
+    new = upd = 0
+    for d in dates:
+        tr = safe_api("trainingreadiness", f"/metrics-service/metrics/trainingreadiness/{d}")
+        tr = (tr[0] if isinstance(tr, list) and tr else tr) or {}
+        ts = safe_api("trainingstatus", f"/metrics-service/metrics/trainingstatus/aggregated/{d}") or {}
+        mrts = _first_val((ts.get("mostRecentTrainingStatus") or {}).get("latestTrainingStatusData")) or {}
+        lb = _first_val((ts.get("mostRecentTrainingLoadBalance") or {}).get("metricsTrainingLoadBalanceDTOMap"))
+        es = safe_api("endurancescore", "/metrics-service/metrics/endurancescore", params={"calendarDate": d}) or {}
+        hs = safe_api("hillscore", "/metrics-service/metrics/hillscore", params={"calendarDate": d}) or {}
+        fa = safe_api("fitnessage", f"/fitnessage-service/fitnessage/{d}") or {}
+        race = race_map.get(d, {})
+        row = {
+            "training_readiness_score": tr.get("score"),
+            "tr_level": tr.get("level"),
+            "tr_recovery_time": tr.get("recoveryTime"),
+            "tr_acute_load": tr.get("acuteLoad"),
+            "tr_acwr_percent": tr.get("acwrFactorPercent"),
+            "training_status_code": mrts.get("trainingStatus"),
+            "ts_weekly_load": mrts.get("weeklyTrainingLoad"),
+            "ts_load_balance": json.dumps(lb, ensure_ascii=False, separators=(",", ":")) if lb else None,
+            "endurance_score": es.get("overallScore"),
+            "hill_score": hs.get("overallScore"),
+            "hill_strength": hs.get("strengthScore"),
+            "hill_endurance": hs.get("enduranceScore"),
+            "vo2max": vo2_for(d),
+            "fitness_age": fa.get("fitnessAge"),
+            "fitness_age_chronological": fa.get("chronologicalAge"),
+            "race_5k_sec": race.get("time5K"),
+            "race_10k_sec": race.get("time10K"),
+            "race_hm_sec": race.get("timeHalfMarathon"),
+            "race_m_sec": race.get("timeMarathon"),
+        }
+        if all(v is None for v in row.values()):
+            continue
+        cols = ["calendar_date"] + list(row.keys())
+        vals = [d] + list(row.values())
+        stmts.append(upsert("garmin_scores", cols, vals, "calendar_date", list(row.keys())))
+        if d in have:
+            upd += 1
+        else:
+            new += 1
+    summary["garmin_scores"] = (new, upd)
+    if _score_fails:
+        warn("Score-Endpunkt-Ausfälle (einzelne Tage ok): " + ", ".join(f"{k}={v}" for k, v in _score_fails.items()))
+
+
 # --------------------------------------------------------------------------- #
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -473,6 +604,7 @@ def main() -> int:
     cat("daily", lambda: sync_daily(dn, args.days, stmts, summary))
     cat("sleep", lambda: sync_sleep(dn, args.days, stmts, summary))
     cat("health", lambda: sync_health(dn, args.days, acts_recent, stmts, summary))
+    cat("scores", lambda: sync_scores(dn, args.days, stmts, summary))
 
     if stmts:
         try:
@@ -482,9 +614,21 @@ def main() -> int:
             return 1
 
     log("\n== Zusammenfassung (neu / aktualisiert) ==")
-    for t in ["activities", "garmin_daily", "garmin_sleep", "garmin_health"]:
+    for t in ["activities", "garmin_daily", "garmin_sleep", "garmin_health", "garmin_scores"]:
         n, u = summary.get(t, (0, 0))
         log(f"  {t:14} {n} neu / {u} aktualisiert")
+
+    # Coverage: wie viele Tage haben tatsächlich Daten je Score-Feld (gesamte Tabelle).
+    try:
+        sel = "SELECT COUNT(*) AS zeilen, " + ", ".join(f"COUNT({c}) AS {c}" for c in SCORE_FIELDS) + " FROM garmin_scores"
+        cov = d1_query(sel)
+        if cov:
+            row = cov[0]
+            log(f"\n== garmin_scores Coverage (Tage mit Daten je Feld · gesamt {row.get('zeilen')}) ==")
+            for c in SCORE_FIELDS:
+                log(f"  {c:28} {row.get(c)}")
+    except Exception as e:  # noqa: BLE001
+        warn(f"Coverage-Report nicht möglich: {e}")
 
     if _failures:
         err(f"Abgeschlossen mit Fehlern in: {', '.join(_failures)}")

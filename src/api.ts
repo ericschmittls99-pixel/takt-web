@@ -138,6 +138,29 @@ export interface GarminSleep {
   resting_hr: number | null
 }
 
+export interface GarminScores {
+  calendar_date: string
+  training_readiness_score: number | null
+  tr_level: string | null
+  tr_recovery_time: number | null
+  tr_acute_load: number | null
+  tr_acwr_percent: number | null
+  training_status_code: number | null
+  ts_weekly_load: number | null
+  ts_load_balance: unknown // JSON (geparst) oder null
+  endurance_score: number | null
+  hill_score: number | null
+  hill_strength: number | null
+  hill_endurance: number | null
+  vo2max: number | null
+  fitness_age: number | null
+  fitness_age_chronological: number | null
+  race_5k_sec: number | null
+  race_10k_sec: number | null
+  race_hm_sec: number | null
+  race_m_sec: number | null
+}
+
 // Ein Puls-Workout: entweder ein Sport-time_entry (origin='entry', ab Stichtag,
 // mit Bereichszuordnung) ODER eine Historien-Aktivität vor Stichtag (origin='history',
 // nur Puls, keine Zeitbuchung, kein Bereich).
@@ -415,6 +438,8 @@ export const api = {
   getGarminDaily: (from: string, to: string) => request<GarminDaily[]>(`/api/garmin/daily?from=${from}&to=${to}`),
 
   getGarminSleep: (from: string, to: string) => request<GarminSleep[]>(`/api/garmin/sleep?from=${from}&to=${to}`),
+
+  getGarminScores: (from: string, to: string) => request<GarminScores[]>(`/api/garmin/scores?from=${from}&to=${to}`),
 
   getGarminActivity: (id: number) => request<GarminActivityDetail>(`/api/garmin/activities/${id}`),
 
