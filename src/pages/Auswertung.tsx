@@ -4,6 +4,7 @@ import { employerColor } from '../colors'
 import { holidayName } from '../holidays'
 import { distributeAbsenceMinutes } from '../absence'
 import EntryEditor from '../components/EntryEditor'
+import InboxPopover from '../components/InboxPopover'
 import type { PageIntent } from '../App'
 
 const GLASS: CSSProperties = {
@@ -75,7 +76,7 @@ interface AuswertungProps {
   onIntentDone: () => void
 }
 
-export default function Auswertung({ theme, onToggleTheme, onBack, onOpenCalendar, onOpenTodos, onOpenSpotlight, settings, setSelectedDay, mode, onModeChange, intent, onIntentDone }: AuswertungProps) {
+export default function Auswertung({ theme, onBack, onOpenCalendar, onOpenTodos, onOpenSpotlight, settings, setSelectedDay, mode, onModeChange, intent, onIntentDone }: AuswertungProps) {
   const [ref, setRef] = useState(() => startOfDay(new Date()))
   const [areaFilter, setAreaFilter] = useState<number | 'all'>('all')
   const [employers, setEmployers] = useState<Employer[]>([])
@@ -330,9 +331,7 @@ export default function Auswertung({ theme, onToggleTheme, onBack, onOpenCalenda
             <div onClick={onOpenCalendar} title="Kalender" style={{ width: 40, height: 40, borderRadius: '50%', ...GLASS, display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--ink2)' }}>
               <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="2.5" /><path d="M3 9.5h18" /><path d="M8 2.5v4" /><path d="M16 2.5v4" /></svg>
             </div>
-            <div onClick={onToggleTheme} title="Farbschema" style={{ width: 40, height: 40, borderRadius: '50%', ...GLASS, display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--ink2)' }}>
-              {theme === 'light' ? <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" /></svg> : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4.5" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>}
-            </div>
+            <InboxPopover onChanged={reloadEntries} onOpenTodos={onOpenTodos} />
           </div>
         </div>
 

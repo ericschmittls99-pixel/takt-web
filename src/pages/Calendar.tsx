@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch
 import { api, type Absence, type AbsenceType, type AppSettings, type AreaHours, type Employer, type Entry, type PlannedBlock, type PlannedOverride, type Project } from '../api'
 import { employerColor } from '../colors'
 import EntryEditor from '../components/EntryEditor'
+import InboxPopover from '../components/InboxPopover'
 import TimeField from '../components/TimeField'
 import { holidayName } from '../holidays'
 import { distributeAbsenceMinutes } from '../absence'
@@ -293,7 +294,7 @@ interface CalendarProps {
   onIntentDone: () => void
 }
 
-export default function Calendar({ theme, onToggleTheme, onBack, onOpenTodos, onOpenSpotlight, settings, selectedDay, setSelectedDay, intent, onIntentDone }: CalendarProps) {
+export default function Calendar({ theme, onBack, onOpenTodos, onOpenSpotlight, settings, selectedDay, setSelectedDay, intent, onIntentDone }: CalendarProps) {
   const [calView, setCalView] = useState<'week' | 'month' | 'year' | 'planner' | 'list'>('week')
   const [splitPlan, setSplitPlan] = useState(false) // Wochenansicht: Ist links, Plan rechts (kompletter Plan)
 
@@ -1287,13 +1288,7 @@ export default function Calendar({ theme, onToggleTheme, onBack, onOpenTodos, on
                 <path d="M4 18l1 1 2-2" />
               </svg>
             </div>
-            <div onClick={onToggleTheme} title="Farbschema wechseln" style={{ width: 40, height: 40, borderRadius: '50%', ...GLASS, display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--ink2)' }}>
-              {theme === 'light' ? (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" /></svg>
-              ) : (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4.5" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>
-              )}
-            </div>
+            <InboxPopover onChanged={reloadEntries} onOpenTodos={onOpenTodos} />
           </div>
         </div>
 
@@ -1374,6 +1369,12 @@ export default function Calendar({ theme, onToggleTheme, onBack, onOpenTodos, on
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <div style={{ width: 12, height: 12, borderRadius: 4, background: color }} />
                     <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase', color: end ? 'var(--ink3)' : 'var(--accent, #16A34A)' }}>{end ? 'Erfasst' : 'Läuft'}</div>
+                    {e.activity_id != null && (
+                      <div title="Verknüpftes Workout · Deep-Dive folgt (WP3)" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 8, background: 'color-mix(in srgb, var(--accent, #16A34A) 14%, transparent)', color: 'var(--accent, #16A34A)', fontSize: 10.5, fontWeight: 800, letterSpacing: '0.5px' }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h4l2 5 4-10 2 5h6" /></svg>
+                        PULS
+                      </div>
+                    )}
                     <div style={{ flex: 1 }} />
                     <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{durLabel}</div>
                   </div>

@@ -61,6 +61,37 @@ export interface Entry {
   duration_min: number | null
   note: string | null
   created_at: string
+  activity_id?: number | null // verknüpfte Garmin/manuelle Aktivität (LEFT JOIN), null = keine
+}
+
+// Garmin/manuelle Aktivität (activities-Tabelle). Nur die im UI genutzten Felder typisiert.
+export interface GarminActivity {
+  id: number
+  source: 'garmin' | 'manual'
+  garmin_activity_id: string | null
+  start_ts: string | null
+  type: string | null
+  name: string | null
+  duration_sec: number | null
+  distance_m: number | null
+  calories: number | null
+  avg_hr: number | null
+  max_hr: number | null
+  elevation_gain_m: number | null
+  vo2max: number | null
+  total_reps: number | null
+  total_sets: number | null
+  status: 'inbox' | 'assigned' | 'ignored'
+  employer_id: number | null
+  project_id: number | null
+  note: string | null
+  entry_id: number | null
+}
+
+export interface GarminSuggestion {
+  employer_id: number | null
+  project_id: number | null
+  source: 'history' | 'mapping' | 'none'
 }
 
 export interface PlannedBlock {
@@ -296,6 +327,21 @@ export const api = {
 
   deleteTodo: (id: number) =>
     request<void>(`/api/todos/${id}`, { method: 'DELETE' }),
+
+  // Garmin (WP2): Inbox lesen, Vorschlag holen, Zuordnung setzen.
+  getGarminInbox: () => request<GarminActivity[]>('/api/garmin/activities?status=inbox'),
+
+  getGarminSuggestion: (activityId: number) =>
+    request<GarminSuggestion>(`/api/garmin/suggestion?activity_id=${activityId}`),
+
+  patchGarminActivity: (
+    id: number,
+    body: { action: 'assign' | 'ignore' | 'unassign'; employer_id?: number; project_id?: number | null; note?: string | null },
+  ) =>
+    request<GarminActivity>(`/api/garmin/activities/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
 
   // date optional: mit date werden die Blöcke des passenden Wochentags geliefert.
   getPlanned: (date?: string) =>

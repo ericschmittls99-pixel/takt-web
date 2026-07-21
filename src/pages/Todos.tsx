@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import { createPortal } from 'react-dom'
 import { api, type Employer, type Project, type Todo, type TodoPatch } from '../api'
 import { employerColor } from '../colors'
+import InboxPopover from '../components/InboxPopover'
 import type { PageIntent } from '../App'
 
 // Farbe eines Bereichs: konfigurierte Bereichsfarbe, sonst Palette-Fallback.
@@ -738,7 +739,7 @@ interface TodosProps {
   onIntentDone: () => void
 }
 
-export default function Todos({ theme, onToggleTheme, onBack, onOpenCalendar, onOpenSpotlight, intent, onIntentDone }: TodosProps) {
+export default function Todos({ theme, onBack, onOpenCalendar, onOpenSpotlight, intent, onIntentDone }: TodosProps) {
   const [employers, setEmployers] = useState<Employer[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [todos, setTodos] = useState<Todo[]>([])
@@ -1167,22 +1168,7 @@ export default function Todos({ theme, onToggleTheme, onBack, onOpenCalendar, on
                 <path d="M16 2.5v4" />
               </svg>
             </div>
-            <div
-              onClick={onToggleTheme}
-              title="Farbschema wechseln"
-              style={{ width: 40, height: 40, borderRadius: '50%', ...GLASS, display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--ink2)' }}
-            >
-              {theme === 'light' ? (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
-                </svg>
-              ) : (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="4.5" />
-                  <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
-                </svg>
-              )}
-            </div>
+            <InboxPopover onChanged={loadTodos} onOpenTodos={() => {}} />
           </div>
         </div>
 

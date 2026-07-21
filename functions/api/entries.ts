@@ -8,8 +8,10 @@ interface CreateEntryBody {
 }
 
 export const onRequestGet: PagesFunction<Env> = async ({ env }) => {
+  // activity_id = verknüpfte Garmin/manuelle Aktivität (für das Puls-Icon an Einträgen).
   const { results } = await env.DB.prepare(
-    'SELECT id, employer_id, project_id, start_ts, end_ts, duration_min, note, created_at FROM time_entries ORDER BY start_ts DESC',
+    'SELECT te.id, te.employer_id, te.project_id, te.start_ts, te.end_ts, te.duration_min, te.note, te.created_at, a.id AS activity_id ' +
+      'FROM time_entries te LEFT JOIN activities a ON a.entry_id = te.id ORDER BY te.start_ts DESC',
   ).all()
   return json(results)
 }

@@ -5,6 +5,7 @@ import { holidayName } from '../holidays'
 import { distributeAbsenceMinutes } from '../absence'
 import { parseQuickTodo } from '../todoParse'
 import EntryEditor from '../components/EntryEditor'
+import InboxPopover from '../components/InboxPopover'
 import TimeField from '../components/TimeField'
 import type { PageIntent } from '../App'
 
@@ -845,7 +846,7 @@ type SegPopup =
   | { kind: 'plan'; label: string; s: number; e: number; color: string }
   | { kind: 'absence'; absence: Absence }
 
-export default function MeinTag({ theme, onToggleTheme, onOpenTodos, onOpenCalendar, onOpenAuswertung, onOpenVerwalten, onOpenSpotlight, settings, selectedDay, setSelectedDay, intent, onIntentDone }: MeinTagProps) {
+export default function MeinTag({ theme, onOpenTodos, onOpenCalendar, onOpenAuswertung, onOpenVerwalten, onOpenSpotlight, settings, selectedDay, setSelectedDay, intent, onIntentDone }: MeinTagProps) {
   const [employers, setEmployers] = useState<Employer[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [areaHours, setAreaHours] = useState<AreaHours[]>([])
@@ -1431,18 +1432,7 @@ export default function MeinTag({ theme, onToggleTheme, onOpenTodos, onOpenCalen
                 <path d="M15 7h6" />
               </svg>
             </IconBtn>
-            <IconBtn title="Farbschema wechseln" onClick={onToggleTheme}>
-              {theme === 'light' ? (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
-                </svg>
-              ) : (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="4.5" />
-                  <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
-                </svg>
-              )}
-            </IconBtn>
+            <InboxPopover onChanged={loadEntries} onOpenTodos={onOpenTodos} />
 
             {running && runningLabel && (
               <div
@@ -1691,6 +1681,12 @@ export default function MeinTag({ theme, onToggleTheme, onOpenTodos, onOpenCalen
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <div style={{ width: 12, height: 12, borderRadius: 4, background: lbl.color }} />
                         <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase', color: end ? 'var(--ink3)' : 'var(--accent, #16A34A)' }}>{end ? 'Erfasst' : 'Läuft'}</div>
+                        {e.activity_id != null && (
+                          <div title="Verknüpftes Workout · Deep-Dive folgt (WP3)" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 8, background: 'color-mix(in srgb, var(--accent, #16A34A) 14%, transparent)', color: 'var(--accent, #16A34A)', fontSize: 10.5, fontWeight: 800, letterSpacing: '0.5px' }}>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h4l2 5 4-10 2 5h6" /></svg>
+                            PULS
+                          </div>
+                        )}
                         <div style={{ flex: 1 }} />
                         <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{fmtHM(durMin)}</div>
                       </div>

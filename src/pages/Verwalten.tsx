@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { api, type AbsenceTypeConfig, type AppSettings, type AreaHours, type Employer, type EmployerKind, type Project } from '../api'
 import { employerColor } from '../colors'
+import InboxPopover from '../components/InboxPopover'
 import { BUNDESLAENDER } from '../holidays'
 import { EMOJI_CATEGORIES, SUGGESTED_ICONS, suggestIcons } from '../emojis'
 import { COMMANDS, COMMAND_GROUPS, DEFAULT_HOTKEYS, eventToHotkey, formatHotkey, type CommandId } from '../commands'
@@ -424,13 +425,7 @@ export default function Verwalten({ theme, onToggleTheme, onBack, onOpenTodos, o
             <div onClick={onOpenCalendar} title="Kalender" style={iconBtn}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="2.5" /><path d="M3 9.5h18" /><path d="M8 2.5v4" /><path d="M16 2.5v4" /></svg>
             </div>
-            <div onClick={onToggleTheme} title="Farbschema wechseln" style={iconBtn}>
-              {theme === 'light' ? (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" /></svg>
-              ) : (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4.5" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>
-              )}
-            </div>
+            <InboxPopover onChanged={() => {}} onOpenTodos={onOpenTodos} />
           </div>
         </div>
 
@@ -481,6 +476,15 @@ export default function Verwalten({ theme, onToggleTheme, onBack, onOpenTodos, o
                         <option key={b.code} value={b.code}>{b.name}</option>
                       ))}
                     </select>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--ink)' }}>Dunkles Design</div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink3)' }}>Farbschema global umschalten (auch per Kürzel).</div>
+                  </div>
+                  <div onClick={onToggleTheme} style={{ width: 46, height: 26, borderRadius: 13, background: theme === 'dark' ? 'var(--accent, #22C55E)' : 'var(--track)', position: 'relative', cursor: 'pointer', flex: 'none', transition: 'background .2s ease' }}>
+                    <div style={{ position: 'absolute', top: 2, left: theme === 'dark' ? 22 : 2, width: 22, height: 22, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.25)', transition: 'left .2s ease' }} />
                   </div>
                 </div>
               </div>
