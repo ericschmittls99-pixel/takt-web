@@ -3,6 +3,7 @@ import { api, type Absence, type AbsenceType, type AppSettings, type AreaHours, 
 import { employerColor } from '../colors'
 import EntryEditor from '../components/EntryEditor'
 import InboxPopover from '../components/InboxPopover'
+import ActivityDeepDive from '../components/ActivityDeepDive'
 import TimeField from '../components/TimeField'
 import { holidayName } from '../holidays'
 import { distributeAbsenceMinutes } from '../absence'
@@ -351,6 +352,7 @@ export default function Calendar({ theme, onBack, onOpenTodos, onOpenSpotlight, 
   const [editor, setEditor] = useState<Draft | null>(null)
   const [entryEdit, setEntryEdit] = useState<Entry | null>(null)
   const [entryPopup, setEntryPopup] = useState<Entry | null>(null)
+  const [deepDiveId, setDeepDiveId] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
   const [drag, setDrag] = useState<{ block: PlanBlock; mode: 'week' | 'planner'; targetKey: string; newStart: number; dur: number } | null>(null)
@@ -1370,7 +1372,7 @@ export default function Calendar({ theme, onBack, onOpenTodos, onOpenSpotlight, 
                     <div style={{ width: 12, height: 12, borderRadius: 4, background: color }} />
                     <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase', color: end ? 'var(--ink3)' : 'var(--accent, #16A34A)' }}>{end ? 'Erfasst' : 'Läuft'}</div>
                     {e.activity_id != null && (
-                      <div title="Verknüpftes Workout · Deep-Dive folgt (WP3)" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 8, background: 'color-mix(in srgb, var(--accent, #16A34A) 14%, transparent)', color: 'var(--accent, #16A34A)', fontSize: 10.5, fontWeight: 800, letterSpacing: '0.5px' }}>
+                      <div onClick={() => { setEntryPopup(null); setDeepDiveId(e.activity_id!) }} title="Workout-Details (Deep-Dive)" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 8, background: 'color-mix(in srgb, var(--accent, #16A34A) 14%, transparent)', color: 'var(--accent, #16A34A)', fontSize: 10.5, fontWeight: 800, letterSpacing: '0.5px', cursor: 'pointer' }}>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h4l2 5 4-10 2 5h6" /></svg>
                         PULS
                       </div>
@@ -1392,6 +1394,7 @@ export default function Calendar({ theme, onBack, onOpenTodos, onOpenSpotlight, 
         })()}
 
         {entryEdit && <EntryEditor entry={entryEdit} employers={employers} projects={projects} onClose={() => setEntryEdit(null)} onSaved={reloadEntries} />}
+        {deepDiveId != null && <ActivityDeepDive activityId={deepDiveId} employers={employers} projects={projects} onClose={() => setDeepDiveId(null)} onChanged={reloadEntries} onEditEntry={(entryId) => { setDeepDiveId(null); const en = entries.find((x) => x.id === entryId); if (en) setEntryEdit(en) }} />}
 
         {absSheet && (
           <div onClick={() => setAbsSheet(false)} style={{ position: 'absolute', inset: 0, zIndex: 66, background: 'var(--veil)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 40 }}>

@@ -216,13 +216,28 @@ def build_hr_curve(detail: dict) -> list[dict]:
     return pts
 
 
+def convert_exercise_sets(sets):
+    """Garmin liefert maxWeight in Gramm -> in kg umrechnen (konsistent mit manueller Eingabe)."""
+    if not isinstance(sets, list):
+        return sets
+    out = []
+    for s in sets:
+        if isinstance(s, dict):
+            s = dict(s)
+            mw = s.get("maxWeight")
+            if isinstance(mw, (int, float)) and mw:
+                s["maxWeight"] = round(mw / 1000, 2)
+        out.append(s)
+    return out
+
+
 def build_activity_detail_payload(a: dict, detail: dict | None) -> dict:
     hz = {f"z{i}": a.get(f"hrTimeInZone_{i}") for i in range(1, 6)}
     payload = {
         "hr_curve": build_hr_curve(detail) if detail else [],
         "hr_zones_sec": {k: v for k, v in hz.items() if v is not None},
         "splits": a.get("splitSummaries"),
-        "exercise_sets": a.get("summarizedExerciseSets"),
+        "exercise_sets": convert_exercise_sets(a.get("summarizedExerciseSets")),
     }
     return payload
 
@@ -335,7 +350,8 @@ def sync_activities(days: int, stmts: list[str], summary: dict) -> None:
         stmts.append(
             f"INSERT INTO activity_details (activity_id, payload) "
             f"SELECT id, {qj(payload)} FROM activities WHERE garmin_activity_id={q(gid)} "
-            f"ON CONFLICT(activity_id) DO UPDATE SET payload=excluded.payload;")
+            f"ON CONFLICT(activity_id) DO UPDATE SET payload=excluded.payload "
+            f"WHERE activity_details.edited = 0;")
         if gid in have:
             upd += 1
         else:

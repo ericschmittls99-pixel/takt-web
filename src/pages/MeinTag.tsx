@@ -6,6 +6,7 @@ import { distributeAbsenceMinutes } from '../absence'
 import { parseQuickTodo } from '../todoParse'
 import EntryEditor from '../components/EntryEditor'
 import InboxPopover from '../components/InboxPopover'
+import ActivityDeepDive from '../components/ActivityDeepDive'
 import TimeField from '../components/TimeField'
 import type { PageIntent } from '../App'
 
@@ -861,6 +862,7 @@ export default function MeinTag({ theme, onOpenTodos, onOpenCalendar, onOpenAusw
   const [now, setNow] = useState(() => new Date())
   const [addOpen, setAddOpen] = useState(false)
   const [editEntry, setEditEntry] = useState<Entry | null>(null)
+  const [deepDiveId, setDeepDiveId] = useState<number | null>(null)
   const [segPopup, setSegPopup] = useState<SegPopup | null>(null)
   const [areaPopup, setAreaPopup] = useState<number | null>(null) // Bereichs-Detail (employer_id)
   const [areaProjOpen, setAreaProjOpen] = useState<string | null>(null) // aufgeklappte Projektzeile im Bereichs-Popup
@@ -1665,6 +1667,10 @@ export default function MeinTag({ theme, onOpenTodos, onOpenCalendar, onOpenAusw
           />
         )}
 
+        {deepDiveId != null && (
+          <ActivityDeepDive activityId={deepDiveId} employers={employers} projects={projects} onClose={() => setDeepDiveId(null)} onChanged={loadEntries} onEditEntry={(entryId) => { setDeepDiveId(null); const en = entries.find((x) => x.id === entryId); if (en) setEditEntry(en) }} />
+        )}
+
         {/* Klick-Popup für Uhr-Segmente */}
         {segPopup && (
           <div onClick={() => setSegPopup(null)} style={{ position: 'absolute', inset: 0, zIndex: 80, background: 'var(--veil)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 34 }}>
@@ -1682,7 +1688,7 @@ export default function MeinTag({ theme, onOpenTodos, onOpenCalendar, onOpenAusw
                         <div style={{ width: 12, height: 12, borderRadius: 4, background: lbl.color }} />
                         <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase', color: end ? 'var(--ink3)' : 'var(--accent, #16A34A)' }}>{end ? 'Erfasst' : 'Läuft'}</div>
                         {e.activity_id != null && (
-                          <div title="Verknüpftes Workout · Deep-Dive folgt (WP3)" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 8, background: 'color-mix(in srgb, var(--accent, #16A34A) 14%, transparent)', color: 'var(--accent, #16A34A)', fontSize: 10.5, fontWeight: 800, letterSpacing: '0.5px' }}>
+                          <div onClick={() => { setSegPopup(null); setDeepDiveId(e.activity_id!) }} title="Workout-Details (Deep-Dive)" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 8, background: 'color-mix(in srgb, var(--accent, #16A34A) 14%, transparent)', color: 'var(--accent, #16A34A)', fontSize: 10.5, fontWeight: 800, letterSpacing: '0.5px', cursor: 'pointer' }}>
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h4l2 5 4-10 2 5h6" /></svg>
                             PULS
                           </div>

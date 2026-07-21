@@ -94,6 +94,29 @@ export interface GarminSuggestion {
   source: 'history' | 'mapping' | 'none'
 }
 
+export interface ActivityDetailPayload {
+  hr_curve?: { t: number | null; v: number }[]
+  hr_zones_sec?: Record<string, number>
+  splits?: Record<string, unknown>[]
+  exercise_sets?: Record<string, unknown>[]
+}
+export interface GarminActivityDetail extends GarminActivity {
+  details: ActivityDetailPayload | null
+}
+export interface ActivityEdit {
+  duration_sec?: number | null
+  distance_m?: number | null
+  calories?: number | null
+  avg_hr?: number | null
+  max_hr?: number | null
+}
+export interface ExerciseEditRow {
+  name: string
+  sets: number | null
+  reps: number | null
+  max_weight: number | null
+}
+
 export interface PlannedBlock {
   id: number
   employer_id: number
@@ -330,6 +353,20 @@ export const api = {
 
   // Garmin (WP2): Inbox lesen, Vorschlag holen, Zuordnung setzen.
   getGarminInbox: () => request<GarminActivity[]>('/api/garmin/activities?status=inbox'),
+
+  getGarminActivity: (id: number) => request<GarminActivityDetail>(`/api/garmin/activities/${id}`),
+
+  editGarminActivity: (id: number, fields: ActivityEdit) =>
+    request<GarminActivity>(`/api/garmin/activities/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ action: 'edit', ...fields }),
+    }),
+
+  editGarminExercises: (id: number, exercises: ExerciseEditRow[]) =>
+    request<GarminActivity>(`/api/garmin/activities/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ action: 'edit-exercises', exercises }),
+    }),
 
   getGarminSuggestion: (activityId: number) =>
     request<GarminSuggestion>(`/api/garmin/suggestion?activity_id=${activityId}`),

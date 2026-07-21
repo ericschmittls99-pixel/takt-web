@@ -26,6 +26,21 @@ interface PatchBody {
   employer_id?: unknown
   project_id?: unknown
   note?: unknown
+  // action='edit' (nur source='manual'): Mess-KPIs auf activities-Spalten.
+  duration_sec?: unknown
+  distance_m?: unknown
+  calories?: unknown
+  avg_hr?: unknown
+  max_hr?: unknown
+  // action='edit-exercises': [{ name, sets, reps, max_weight }]
+  exercises?: unknown
+}
+
+const EDIT_COLS = ['duration_sec', 'distance_m', 'calories', 'avg_hr', 'max_hr'] as const
+function numOrNull(v: unknown): number | null {
+  if (v === null || v === undefined || v === '') return null
+  const n = typeof v === 'number' ? v : Number(v)
+  return Number.isFinite(n) ? n : null
 }
 
 // Wandelt Garmin-Startzeit (lokale Wall-Clock) + Dauer in time_entries-Felder.
@@ -54,8 +69,49 @@ export const onRequestPatch: PagesFunction<Env, 'id'> = async ({ env, request, p
 
   const body = (await request.json()) as PatchBody
   const action = body.action
-  if (action !== 'assign' && action !== 'ignore' && action !== 'unassign') {
-    return badRequest("action muss 'assign', 'ignore' oder 'unassign' sein")
+  if (action !== 'assign' && action !== 'ignore' && action !== 'unassign' && action !== 'edit' && action !== 'edit-exercises') {
+    return badRequest("action muss 'assign', 'ignore', 'unassign', 'edit' oder 'edit-exercises' sein")
+  }
+
+  if (action === 'edit-exercises') {
+    // Übungssätze im activity_details-Payload ersetzen und als bearbeitet markieren
+    // (Sync überschreibt edited=1 nicht — gilt auch für Garmin-Workouts).
+    if (!Array.isArray(body.exercises)) return badRequest('exercises (array) erforderlich')
+    const clean = []
+    for (const e of body.exercises) {
+      if (typeof e !== 'object' || e === null) continue
+      const rec = e as Record<string, unknown>
+      const name = typeof rec.name === 'string' ? rec.name.trim() : ''
+      if (!name) continue
+      clean.push({ name, sets: numOrNull(rec.sets), reps: numOrNull(rec.reps), maxWeight: numOrNull(rec.max_weight) })
+    }
+    const cur = await env.DB.prepare('SELECT payload FROM activity_details WHERE activity_id = ?').bind(id).first<{ payload: string | null }>()
+    let payload: Record<string, unknown> = {}
+    if (cur?.payload) { try { payload = JSON.parse(cur.payload) as Record<string, unknown> } catch { payload = {} } }
+    payload.exercise_sets = clean
+    await env.DB.prepare(
+      'INSERT INTO activity_details (activity_id, payload, edited) VALUES (?, ?, 1) ' +
+      'ON CONFLICT(activity_id) DO UPDATE SET payload = excluded.payload, edited = 1',
+    ).bind(id, JSON.stringify(payload)).run()
+    return json(await env.DB.prepare('SELECT * FROM activities WHERE id = ?').bind(id).first())
+  }
+
+  if (action === 'edit') {
+    // Nur manuelle Aktivitäten sind editierbar (Garmin-Rohdaten bleiben Sync-Wahrheit).
+    if (act.source !== 'manual') return badRequest('Nur manuelle Aktivitäten sind editierbar')
+    const fields: string[] = []
+    const values: (number | null)[] = []
+    for (const c of EDIT_COLS) {
+      if (!(c in body)) continue
+      const v = (body as Record<string, unknown>)[c]
+      if (v === null) { fields.push(`${c} = ?`); values.push(null) }
+      else if (typeof v === 'number' && Number.isFinite(v)) { fields.push(`${c} = ?`); values.push(v) }
+      else return badRequest(`${c} muss number oder null sein`)
+    }
+    if (fields.length === 0) return badRequest('Keine editierbaren Felder übergeben')
+    values.push(id)
+    await env.DB.prepare(`UPDATE activities SET ${fields.join(', ')} WHERE id = ?`).bind(...values).run()
+    return json(await env.DB.prepare('SELECT * FROM activities WHERE id = ?').bind(id).first())
   }
 
   if (action === 'ignore') {
