@@ -355,6 +355,22 @@ granulare Deep-Dive-Daten (Kurven, Splits, Übungssätze) liegen als **JSON-Payl
   `time_entries` LEFT JOIN activities) + `origin='history'` (activities `status='history'`),
   chronologisch gemischt, Historie dezent markiert; Deep-Dive funktioniert für beide.
 
+### 6.7 Kategorie-2-Scores (WP4b)
+
+- Tageszeitreihe **`garmin_scores`** (PK `calendar_date`): Training Readiness (Score/Level/
+  Recovery-Time/Acute-Load/ACWR), Training Status (Code + `weeklyLoad` + `ts_load_balance` JSON),
+  Endurance Score, Hill Score (+ Strength/Endurance), Fitness Age, Race Predictions (5k/10k/HM/M in s)
+  und **VO2max**. Quellen: `trainingreadiness/{d}`, `trainingstatus/aggregated/{d}`, `endurancescore`,
+  `hillscore`, `fitnessage/{d}` (je **pro Tag**), `maxmet/daily/{start}/{end}` und
+  `racepredictions/daily/{dn}` (je **ein Range-Call → Liste**). Einzelne Score-Ausfälle pro Tag
+  killen den Sync nicht (`safe_api`). **Nicht verfügbar** (Stufe 1): Körpertemperatur, Jetlag Adviser.
+- **Sleep Need** (Sleep Coach) liegt in `garmin_sleep` (`sleep_need_baseline/actual/feedback`) —
+  kein neuer Endpunkt, aus `dailySleepDTO.sleepNeed`.
+- **VO2max-Quellen (gelöste 6.4-Altlast):** **maßgeblich** ist `garmin_scores.vo2max` (aus
+  `maxmet/daily`, lückenlos je Tag) — Primärquelle für den VO2max-Trend. `garmin_health.vo2max`
+  (aus Aktivitäten fortgeschrieben) bleibt bestehen, ist aber nur noch **sekundär** (Fallback/
+  Kompatibilität), nicht die Trend-Quelle.
+
 ---
 
 ## 7. Roadmap (vorgeschlagen, bottom-up & testbar)
