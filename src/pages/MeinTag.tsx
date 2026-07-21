@@ -834,6 +834,7 @@ interface MeinTagProps {
   onOpenCalendar: () => void
   onOpenAuswertung: () => void
   onOpenVerwalten: () => void
+  onOpenPuls: () => void
   onOpenSpotlight: () => void
   settings: AppSettings
   selectedDay: Date
@@ -847,7 +848,7 @@ type SegPopup =
   | { kind: 'plan'; label: string; s: number; e: number; color: string }
   | { kind: 'absence'; absence: Absence }
 
-export default function MeinTag({ theme, onOpenTodos, onOpenCalendar, onOpenAuswertung, onOpenVerwalten, onOpenSpotlight, settings, selectedDay, setSelectedDay, intent, onIntentDone }: MeinTagProps) {
+export default function MeinTag({ theme, onOpenTodos, onOpenCalendar, onOpenAuswertung, onOpenVerwalten, onOpenPuls, onOpenSpotlight, settings, selectedDay, setSelectedDay, intent, onIntentDone }: MeinTagProps) {
   const [employers, setEmployers] = useState<Employer[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [areaHours, setAreaHours] = useState<AreaHours[]>([])
@@ -1432,6 +1433,11 @@ export default function MeinTag({ theme, onOpenTodos, onOpenCalendar, onOpenAusw
                 <circle cx="17" cy="17" r="3" />
                 <path d="M3 17h6" />
                 <path d="M15 7h6" />
+              </svg>
+            </IconBtn>
+            <IconBtn title="Puls" onClick={onOpenPuls}>
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 12h4l2 5 4-11 2 6h6" />
               </svg>
             </IconBtn>
             <InboxPopover onChanged={loadEntries} onOpenTodos={onOpenTodos} />

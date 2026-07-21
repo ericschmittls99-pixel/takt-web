@@ -110,6 +110,53 @@ export interface ActivityEdit {
   avg_hr?: number | null
   max_hr?: number | null
 }
+export interface GarminDaily {
+  calendar_date: string
+  steps: number | null
+  step_goal: number | null
+  resting_hr: number | null
+  min_hr: number | null
+  max_hr: number | null
+  stress_avg: number | null
+  stress_max: number | null
+  bb_high: number | null
+  bb_low: number | null
+  bb_wake: number | null
+  spo2_avg: number | null
+  sleeping_sec: number | null
+}
+export interface GarminSleep {
+  calendar_date: string
+  total_sec: number | null
+  deep_sec: number | null
+  light_sec: number | null
+  rem_sec: number | null
+  awake_sec: number | null
+  score: number | null
+  score_qualifier: string | null
+  hrv_status: string | null
+  resting_hr: number | null
+}
+
+// Ein Sport-Workout = time_entry auf einem Sport-Bereich (+ ggf. Garmin-Metriken).
+export interface Workout {
+  entry_id: number
+  start_ts: string
+  end_ts: string | null
+  duration_min: number | null
+  employer_id: number
+  project_id: number | null
+  note: string | null
+  activity_id: number | null
+  type: string | null
+  name: string | null
+  distance_m: number | null
+  avg_hr: number | null
+  max_hr: number | null
+  training_load: number | null
+  calories: number | null
+}
+
 export interface ExerciseEditRow {
   name: string
   sets: number | null
@@ -359,6 +406,12 @@ export const api = {
 
   // Garmin (WP2): Inbox lesen, Vorschlag holen, Zuordnung setzen.
   getGarminInbox: () => request<GarminActivity[]>('/api/garmin/activities?status=inbox'),
+
+  getGarminWorkouts: () => request<Workout[]>('/api/garmin/workouts'),
+
+  getGarminDaily: (from: string, to: string) => request<GarminDaily[]>(`/api/garmin/daily?from=${from}&to=${to}`),
+
+  getGarminSleep: (from: string, to: string) => request<GarminSleep[]>(`/api/garmin/sleep?from=${from}&to=${to}`),
 
   getGarminActivity: (id: number) => request<GarminActivityDetail>(`/api/garmin/activities/${id}`),
 

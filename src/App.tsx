@@ -4,11 +4,12 @@ import Todos from './pages/Todos'
 import Calendar from './pages/Calendar'
 import Auswertung from './pages/Auswertung'
 import Verwalten from './pages/Verwalten'
+import Puls from './pages/Puls'
 import Spotlight from './components/Spotlight'
 import { api, type AppSettings, type Entry } from './api'
 import { COMMANDS, DEFAULT_HOTKEYS, eventToHotkey, type CommandId } from './commands'
 
-type View = 'mein-tag' | 'todos' | 'calendar' | 'auswertung' | 'verwalten'
+type View = 'mein-tag' | 'todos' | 'calendar' | 'auswertung' | 'verwalten' | 'puls'
 
 type AuswMode = 'week' | 'month' | 'year' | 'gesamt'
 // Durchgängige Zoom-Leiter (Variante B): Tag (Mein Tag) ↔ Woche/Monat/Jahr/Gesamt (Auswertung).
@@ -109,6 +110,9 @@ export default function App() {
         break
       case 'nav-verwalten':
         setView('verwalten')
+        break
+      case 'nav-puls':
+        setView('puls')
         break
       case 'toggle-theme':
         toggleTheme()
@@ -242,6 +246,19 @@ export default function App() {
         onSettingsChange={setSettings}
       />
     )
+  } else if (view === 'puls') {
+    screen = (
+      <Puls
+        theme={theme}
+        onBack={() => setView('mein-tag')}
+        onOpenTodos={() => setView('todos')}
+        onOpenCalendar={() => setView('calendar')}
+        onOpenSpotlight={openSpotlight}
+        settings={settings}
+        selectedDay={selectedDay}
+        onOpenDay={(day: Date) => { setSelectedDay(startOfDay(day)); setView('mein-tag') }}
+      />
+    )
   } else if (view === 'auswertung') {
     screen = (
       <Auswertung
@@ -268,6 +285,7 @@ export default function App() {
         onOpenCalendar={() => setView('calendar')}
         onOpenAuswertung={() => setView('auswertung')}
         onOpenVerwalten={() => setView('verwalten')}
+        onOpenPuls={() => setView('puls')}
         onOpenSpotlight={openSpotlight}
         settings={settings}
         selectedDay={selectedDay}

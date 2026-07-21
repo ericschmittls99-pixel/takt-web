@@ -10,6 +10,7 @@ export type CommandId =
   | 'nav-calendar'
   | 'nav-auswertung'
   | 'nav-verwalten'
+  | 'nav-puls'
   | 'toggle-theme'
   | 'open-spotlight'
   | 'filter-toggle'
@@ -39,6 +40,7 @@ export const COMMANDS: CommandDef[] = [
   { id: 'nav-calendar', label: 'Kalender', group: 'Navigation', icon: '📅' },
   { id: 'nav-auswertung', label: 'Auswertung', group: 'Navigation', icon: '📊' },
   { id: 'nav-verwalten', label: 'Verwalten', group: 'Navigation', icon: '⚙️' },
+  { id: 'nav-puls', label: 'Puls', group: 'Navigation', icon: '💓' },
   { id: 'open-spotlight', label: 'Suche öffnen', group: 'Ansicht', icon: '🔍' },
   { id: 'toggle-theme', label: 'Farbschema wechseln', group: 'Ansicht', icon: '🌓' },
   { id: 'filter-toggle', label: 'Filter (Kalender)', group: 'Ansicht', icon: '🎚️' },
@@ -71,6 +73,7 @@ export const DEFAULT_HOTKEYS: Record<CommandId, string> = {
   'nav-calendar': 'mod+3',
   'nav-auswertung': 'mod+4',
   'nav-verwalten': 'mod+5',
+  'nav-puls': 'mod+6',
   'toggle-theme': 'mod+j',
   'new-entry': 'mod+e',
   'toggle-tracking': 'mod+enter',
