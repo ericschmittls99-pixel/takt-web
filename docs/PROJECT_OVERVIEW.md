@@ -341,6 +341,20 @@ granulare Deep-Dive-Daten (Kurven, Splits, Übungssätze) liegen als **JSON-Payl
   Gramm→kg; Distanz/Dauer bleiben als Basiseinheit in der DB, die **Anzeige** rechnet km/min/Pace.
   Manuelle Eingaben werden auf dieselbe Basis normalisiert.
 
+### 6.6 Historie-Status (WP4a-2)
+
+- `activities.status` kennt zusätzlich **`history`**: Garmin-Aktivitäten **vor dem Stichtag**
+  (`app_settings.start_date`) aus dem 365-Tage-Backfill. **Nur Puls, nie Zeitbuchung/Saldo.**
+  Einmaliger Aufräumer `garmin/backfill_history.sql` (idempotent) hat `inbox`→`history` gesetzt —
+  **kein** dauerhafter Sync-Mechanismus. Re-Sync fasst `history` (wie `assigned`/`ignored`) nicht an.
+- **Aggregationsregel (verbindlich):**
+  - **Körper-/Trainings-Trends** (Trainingslast, VO2max, Wochenvolumen, HF …) zählen `history` **mit**.
+  - **Zeit-Kopplung / Saldo / Mein Tag / Kalender** nutzen **nur** zugeordnete `time_entries` ab
+    Stichtag — `history` fließt dort **nie** ein (hat keinen Bereich).
+- **Puls-Workouts** liest zwei Quellen (`/api/garmin/workouts`, UNION): `origin='entry'` (Sport-
+  `time_entries` LEFT JOIN activities) + `origin='history'` (activities `status='history'`),
+  chronologisch gemischt, Historie dezent markiert; Deep-Dive funktioniert für beide.
+
 ---
 
 ## 7. Roadmap (vorgeschlagen, bottom-up & testbar)

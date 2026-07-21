@@ -91,17 +91,18 @@ export default function Puls({ theme, onBack, onOpenTodos, onOpenCalendar, onOpe
   const empById = useMemo(() => new Map(employers.map((e) => [e.id, e])), [employers])
   const projById = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects])
   const sportIds = useMemo(() => new Set(employers.filter((e) => e.is_sport === 1).map((e) => e.id)), [employers])
-  const colorOf = (id: number) => empById.get(id)?.color ?? employerColor(id)
+  const colorOf = (id: number | null) => (id != null ? empById.get(id)?.color ?? employerColor(id) : '#94A3B8')
 
-  // Ein Workout „vermenschlichen".
+  // Ein Workout „vermenschlichen". history = ohne Bereich, dezent als Historie markiert.
   function view(w: Workout) {
-    const emp = empById.get(w.employer_id)
+    const isHistory = w.origin === 'history'
+    const emp = w.employer_id != null ? empById.get(w.employer_id) : undefined
     const emoji = (w.type && TYPE_EMOJI[w.type]) || emp?.icon || '🏅'
     const typeName = (w.type && (TYPE_LABEL[w.type] || w.type)) || emp?.name || 'Workout'
     const name = w.name || w.note || typeName
-    const project = w.project_id != null ? projById.get(w.project_id)?.name ?? emp?.name ?? '' : emp?.name ?? ''
+    const project = isHistory ? 'Historie' : w.project_id != null ? projById.get(w.project_id)?.name ?? emp?.name ?? '' : emp?.name ?? ''
     const durMin = w.duration_min ?? (w.end_ts ? (parseTs(w.end_ts).getTime() - parseTs(w.start_ts).getTime()) / 60000 : 0)
-    return { emoji, typeName, name, project, durMin, color: colorOf(w.employer_id) }
+    return { emoji, typeName, name, project, durMin, isHistory, color: isHistory ? '#94A3B8' : colorOf(w.employer_id) }
   }
 
   // ---- aktuelle Woche (Mo–So), Heute markiert ----
@@ -320,10 +321,10 @@ function Workouts({ workouts, employers, view, colorOf, openWorkout, typeFilter,
     return true
   }), [workouts, areaFilter, typeFilter, rangeFilter, monday])
 
-  // Zeit-Kopplung (aus gefilterten Workouts)
+  // Zeit-Kopplung: NUR zugeordnete time_entries (origin='entry'). Historie zählt hier NIE mit.
   const areaTime = useMemo(() => {
     const m = new Map<number, number>()
-    for (const w of filtered) m.set(w.employer_id, (m.get(w.employer_id) ?? 0) + (w.duration_min ?? 0))
+    for (const w of filtered) { if (w.origin !== 'entry' || w.employer_id == null) continue; m.set(w.employer_id, (m.get(w.employer_id) ?? 0) + (w.duration_min ?? 0)) }
     const max = Math.max(1, ...m.values())
     return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([id, min]) => ({ id, name: employers.find((e: Employer) => e.id === id)?.name ?? '—', color: colorOf(id), min, w: `${(min / max) * 100}%` }))
   }, [filtered, employers, colorOf])
@@ -370,7 +371,10 @@ function Workouts({ workouts, employers, view, colorOf, openWorkout, typeFilter,
               <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
                 <div style={{ width: 42, height: 42, borderRadius: 13, display: 'grid', placeItems: 'center', fontSize: 20, background: hexA(v.color, 0.16), flex: 'none' }}>{v.emoji}</div>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 15.5, fontWeight: 800, letterSpacing: '-0.3px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.name}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                    <div style={{ fontSize: 15.5, fontWeight: 800, letterSpacing: '-0.3px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.name}</div>
+                    {v.isHistory && <div style={{ flex: 'none', fontSize: 9.5, fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', padding: '2px 6px', borderRadius: 6, background: 'var(--track)', color: 'var(--ink3)', border: '1px dashed var(--hair)' }}>Historie</div>}
+                  </div>
                   <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--ink3)', marginTop: 1 }}>{v.project}</div>
                 </div>
               </div>

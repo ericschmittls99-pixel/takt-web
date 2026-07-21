@@ -81,7 +81,7 @@ export interface GarminActivity {
   vo2max: number | null
   total_reps: number | null
   total_sets: number | null
-  status: 'inbox' | 'assigned' | 'ignored'
+  status: 'inbox' | 'assigned' | 'ignored' | 'history'
   employer_id: number | null
   project_id: number | null
   note: string | null
@@ -138,13 +138,16 @@ export interface GarminSleep {
   resting_hr: number | null
 }
 
-// Ein Sport-Workout = time_entry auf einem Sport-Bereich (+ ggf. Garmin-Metriken).
+// Ein Puls-Workout: entweder ein Sport-time_entry (origin='entry', ab Stichtag,
+// mit Bereichszuordnung) ODER eine Historien-Aktivität vor Stichtag (origin='history',
+// nur Puls, keine Zeitbuchung, kein Bereich).
 export interface Workout {
-  entry_id: number
+  origin: 'entry' | 'history'
+  entry_id: number | null
   start_ts: string
   end_ts: string | null
   duration_min: number | null
-  employer_id: number
+  employer_id: number | null
   project_id: number | null
   note: string | null
   activity_id: number | null
