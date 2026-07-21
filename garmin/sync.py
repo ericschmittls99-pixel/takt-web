@@ -99,6 +99,11 @@ def dates_desc(days: int) -> list[str]:
     return [(today - timedelta(days=i)).isoformat() for i in range(days)]
 
 
+def list_limit(days: int) -> int:
+    """Aktivitätsliste-Limit passend zum Zeitraum (die API liefert most-recent-first)."""
+    return min(1000, max(100, days * 2))
+
+
 # --------------------------------------------------------------------------- #
 # SQL-Helfer
 # --------------------------------------------------------------------------- #
@@ -329,7 +334,7 @@ def map_sleep(sd: dict) -> tuple[str, dict, dict] | None:
 # Sync-Kategorien
 # --------------------------------------------------------------------------- #
 def sync_activities(days: int, stmts: list[str], summary: dict) -> None:
-    acts = api("/activitylist-service/activities/search/activities", params={"start": 0, "limit": 100})
+    acts = api("/activitylist-service/activities/search/activities", params={"start": 0, "limit": list_limit(days)})
     cutoff = (date.today() - timedelta(days=days)).isoformat()
     recent = [a for a in acts if str(a.get("startTimeLocal", ""))[:10] >= cutoff]
     have = existing_keys("activities", "garmin_activity_id")
@@ -447,7 +452,7 @@ def main() -> int:
     # Aktivitäten einmal laden (für activities + health-VO2max).
     try:
         acts_all = api("/activitylist-service/activities/search/activities",
-                       params={"start": 0, "limit": 100})
+                       params={"start": 0, "limit": list_limit(args.days)})
         cutoff = (date.today() - timedelta(days=args.days)).isoformat()
         acts_recent = [a for a in acts_all if str(a.get("startTimeLocal", ""))[:10] >= cutoff]
     except Exception as e:  # noqa: BLE001

@@ -324,6 +324,23 @@ granulare Deep-Dive-Daten (Kurven, Splits, Übungssätze) liegen als **JSON-Payl
 **Offene Nachrüstung (später, nicht WP1):** täglicher VO2max-Endpunkt für lückenlose Werte
 (in WP0 fehlgeschlagen; vorerst Aktivitäts-Quelle).
 
+### 6.5 Betriebs-Erkenntnisse & Konventionen (verifiziert)
+
+- **Aufbewahrung: unbegrenzt.** Speicherverbrauch nach 365-Tage-Backfill gemessen: **~3 MB/Jahr**
+  (bei 234 Workouts). **~92 %** entfallen auf die beiden JSON-Payload-Tabellen `activity_details`
+  (~1,8 MB) und `garmin_sleep.curves` (~1,0 MB); die Summary-Spalten sind vernachlässigbar.
+  Hochrechnung: 10 Jahre ≈ 30 MB → für Cloudflare D1 (Free-Tier 5 GB) unkritisch.
+  **Sparhebel dokumentiert, aber inaktiv:** HF-Kurve von ~200 auf ~100 Punkte reduzieren oder
+  Kurven nur on-demand aus Garmin laden — aktuell kein Handlungsbedarf.
+- **Foreign Keys werden lokal erzwungen** (D1/miniflare). Beim Auflösen einer Verknüpfung daher
+  **immer erst die Referenz lösen, dann löschen**: `UPDATE activities SET entry_id = NULL` vor
+  `DELETE FROM time_entries` (bei manuellen Aktivitäten die `activities`-Zeile vor dem `time_entry`).
+  Sonst `FOREIGN KEY constraint failed`. Betrifft unassign/re-assign und den `time_entries`-Delete-Pfad (6.2).
+- **Einheiten-Konvention:** Garmin liefert **Basiseinheiten** (Gewicht in **Gramm**, Distanz in
+  **Metern**, Dauer in **Sekunden**). **Umrechnung nur an der Grenze:** im Sync z. B. `maxWeight`
+  Gramm→kg; Distanz/Dauer bleiben als Basiseinheit in der DB, die **Anzeige** rechnet km/min/Pace.
+  Manuelle Eingaben werden auf dieselbe Basis normalisiert.
+
 ---
 
 ## 7. Roadmap (vorgeschlagen, bottom-up & testbar)
