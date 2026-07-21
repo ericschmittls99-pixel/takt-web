@@ -1544,8 +1544,9 @@ export default function MeinTag({ theme, onOpenTodos, onOpenCalendar, onOpenAusw
                     const weekIst = weekIstByEmployer.get(emp.id) ?? 0
                     const soll = sollDayMin(emp.id)
                     // Privat: Donut = Wochenziel-Fortschritt (Woche-Ist / Ziel). Arbeit: Tag-Ist / Tag-Soll.
-                    const frac = isPrivate ? (goal > 0 ? Math.min(1, weekIst / goal) : 0) : soll > 0 ? ist / soll : 0
-                    const pct = isPrivate ? (goal > 0 ? Math.round((weekIst / goal) * 100) : 0) : soll > 0 ? Math.round((ist / soll) * 100) : 0
+                    // Ohne Sollzeit (soll=0), aber gebucht → automatisch 100 %.
+                    const frac = isPrivate ? (goal > 0 ? Math.min(1, weekIst / goal) : 0) : soll > 0 ? ist / soll : ist > 0 ? 1 : 0
+                    const pct = isPrivate ? (goal > 0 ? Math.round((weekIst / goal) * 100) : 0) : soll > 0 ? Math.round((ist / soll) * 100) : ist > 0 ? 100 : 0
                     const color = colorFor(emp.id)
                     return (
                       <div key={emp.id} onClick={() => { setAreaPopup(emp.id); setAreaProjOpen(null) }} title={`${emp.name} – Projekte & Details`} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 18px', borderRadius: 22, ...GLASS, cursor: 'pointer' }}>
