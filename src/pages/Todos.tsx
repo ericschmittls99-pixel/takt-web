@@ -105,12 +105,29 @@ function parseGermanDue(text: string): { date: string; clean: string; label: str
 // Editor popup
 // ---------------------------------------------------------------------------
 
+interface Step { text: string; done: boolean }
 interface EditorState {
   id: number | null // null = neu
   title: string
   employerId: number | null
   projectId: number | null
   due: string
+  note: string
+  steps: Step[]
+}
+
+function parseSteps(raw: string | null | undefined): Step[] {
+  if (!raw) return []
+  try {
+    const a = JSON.parse(raw)
+    return Array.isArray(a) ? a.map((s) => ({ text: String(s?.text ?? ''), done: s?.done === 1 || s?.done === true })) : []
+  } catch {
+    return []
+  }
+}
+function serializeSteps(steps: Step[]): string | null {
+  const clean = steps.filter((s) => s.text.trim()).map((s) => ({ text: s.text.trim(), done: s.done ? 1 : 0 }))
+  return clean.length ? JSON.stringify(clean) : null
 }
 
 function TodoEditor({
@@ -226,6 +243,30 @@ function TodoEditor({
               onChange={(e) => onChange({ due: e.target.value })}
               style={{ marginTop: 8, padding: '13px 16px', borderRadius: 14, border: '1px solid var(--hair)', background: 'var(--glass)', color: 'var(--ink)', fontSize: 16, fontWeight: 600, fontFamily: 'inherit', outline: 'none' }}
             />
+          </div>
+
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '1.5px', textTransform: 'uppercase', color: 'var(--ink3)' }}>Notiz <span style={{ fontWeight: 600, textTransform: 'none', letterSpacing: 0 }}>· optional</span></div>
+            <textarea value={state.note} onChange={(e) => onChange({ note: e.target.value })} placeholder="Notiz zur Aufgabe…" rows={2} style={{ width: '100%', boxSizing: 'border-box', marginTop: 8, padding: '12px 14px', borderRadius: 14, border: '1px solid var(--hair)', background: 'var(--glass)', color: 'var(--ink)', fontSize: 15, fontWeight: 600, fontFamily: 'inherit', outline: 'none', resize: 'vertical', minHeight: 52 }} />
+          </div>
+
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '1.5px', textTransform: 'uppercase', color: 'var(--ink3)' }}>Einzelschritte <span style={{ fontWeight: 600, textTransform: 'none', letterSpacing: 0 }}>· optional</span></div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
+              {state.steps.map((s, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div onClick={() => onChange({ steps: state.steps.map((x, idx) => (idx === i ? { ...x, done: !x.done } : x)) })} style={{ width: 22, height: 22, borderRadius: 7, border: `2px solid ${s.done ? NEUTRAL : 'var(--ink3)'}`, background: s.done ? NEUTRAL : 'transparent', display: 'grid', placeItems: 'center', color: '#fff', fontSize: 13, fontWeight: 800, cursor: 'pointer', flex: 'none' }}>{s.done ? '✓' : ''}</div>
+                  <input value={s.text} onChange={(e) => onChange({ steps: state.steps.map((x, idx) => (idx === i ? { ...x, text: e.target.value } : x)) })} placeholder={`Schritt ${i + 1}`} style={{ flex: 1, minWidth: 0, padding: '10px 12px', borderRadius: 12, border: '1px solid var(--hair)', background: 'var(--glass)', color: s.done ? 'var(--ink3)' : 'var(--ink)', textDecoration: s.done ? 'line-through' : 'none', fontSize: 15, fontWeight: 600, fontFamily: 'inherit', outline: 'none' }} />
+                  <div onClick={() => onChange({ steps: state.steps.filter((_, idx) => idx !== i) })} title="Entfernen" style={{ width: 26, height: 26, display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--ink3)', flex: 'none' }}>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                  </div>
+                </div>
+              ))}
+              <div onClick={() => onChange({ steps: [...state.steps, { text: '', done: false }] })} style={{ alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 14, fontWeight: 800, color: 'var(--ink3)', cursor: 'pointer', marginTop: 2 }}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+                Schritt hinzufügen
+              </div>
+            </div>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
@@ -611,6 +652,8 @@ function TodoRow({
 
   const revealRight = dx > 0
   const pass = Math.abs(dx) >= TH
+  const steps = parseSteps(t.steps)
+  const stepsDone = steps.filter((s) => s.done).length
 
   return (
     <div data-todo-id={t.id} data-flip-key={String(t.id)} style={{ position: 'relative', borderRadius: 14, overflow: 'hidden', marginBottom: 8, touchAction: 'pan-y' }}>
@@ -651,6 +694,15 @@ function TodoRow({
               {subName}
             </div>
             {due && <div style={{ fontSize: 12, fontWeight: 700, color: dueColor, fontVariantNumeric: 'tabular-nums' }}>{due.label}</div>}
+            {steps.length > 0 && (
+              <div title="Einzelschritte" style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 700, color: 'var(--ink2)', fontVariantNumeric: 'tabular-nums' }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6h11M9 12h11M9 18h11" /><path d="M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2" /></svg>
+                {stepsDone}/{steps.length}
+              </div>
+            )}
+            {t.note && (
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--ink3)', flex: 'none' }}><path d="M4 5h16M4 10h16M4 15h10" /></svg>
+            )}
           </div>
         </div>
         {/* Greifpunkt zum Sortieren */}
@@ -746,6 +798,7 @@ export default function Todos({ theme, onBack, onOpenCalendar, onOpenSpotlight, 
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [editor, setEditor] = useState<EditorState | null>(null)
+  const [doneOpen, setDoneOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [filterArea, setFilterArea] = useState<number | 'all'>('all')
   const [filterDue, setFilterDue] = useState<'all' | 'overdue' | 'today' | 'week' | 'dated' | 'undated'>('all')
@@ -1060,11 +1113,11 @@ export default function Todos({ theme, onBack, onOpenCalendar, onOpenSpotlight, 
   }
 
   function openNew() {
-    setEditor({ id: null, title: '', employerId: employers[0]?.id ?? null, projectId: null, due: '' })
+    setEditor({ id: null, title: '', employerId: employers[0]?.id ?? null, projectId: null, due: '', note: '', steps: [] })
   }
 
   function openEdit(t: Todo) {
-    setEditor({ id: t.id, title: t.title, employerId: t.employer_id, projectId: t.project_id, due: t.due_date ?? '' })
+    setEditor({ id: t.id, title: t.title, employerId: t.employer_id, projectId: t.project_id, due: t.due_date ?? '', note: t.note ?? '', steps: parseSteps(t.steps) })
   }
 
   async function saveEditor() {
@@ -1076,6 +1129,8 @@ export default function Todos({ theme, onBack, onOpenCalendar, onOpenSpotlight, 
         due_date: editor.due ? editor.due : null,
         employer_id: editor.employerId,
         project_id: editor.projectId,
+        note: editor.note.trim() ? editor.note.trim() : null,
+        steps: serializeSteps(editor.steps),
       }
       if (editor.id === null) await api.createTodo(payload)
       else await api.updateTodo(editor.id, payload)
@@ -1262,10 +1317,22 @@ export default function Todos({ theme, onBack, onOpenCalendar, onOpenSpotlight, 
                 <div style={{ color: 'var(--ink3)', fontWeight: 600, padding: '4px 2px' }}>{anyFilter ? 'Keine Aufgaben für diese Filter.' : 'Alles erledigt 🎉'}</div>
               )}
 
-              {displayGroups.map((sec) => (
+              {displayGroups.map((sec) => {
+                const isDone = sec.key === 'done'
+                const collapsed = isDone && !doneOpen
+                const doneCount = sec.rows.filter((r) => r.type !== 'placeholder').length
+                return (
                 <div key={sec.key} data-group-key={sec.key} style={{ marginBottom: 22 }}>
-                  <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '1.5px', textTransform: 'uppercase', color: sec.accent, margin: '2px 0 10px 2px' }}>{sec.label}</div>
-                  {sec.rows.map((row) =>
+                  {isDone ? (
+                    <div onClick={() => setDoneOpen((o) => !o)} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', margin: '2px 0 10px 2px' }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--ink3)', transform: doneOpen ? 'rotate(90deg)' : 'none', transition: 'transform .18s ease' }}><path d="M9 6l6 6-6 6" /></svg>
+                      <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '1.5px', textTransform: 'uppercase', color: sec.accent }}>{sec.label}</div>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--ink3)' }}>{doneCount}</div>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '1.5px', textTransform: 'uppercase', color: sec.accent, margin: '2px 0 10px 2px' }}>{sec.label}</div>
+                  )}
+                  {!collapsed && sec.rows.map((row) =>
                     row.type === 'placeholder' ? (
                       <div key="__ph" data-flip-key="__ph" style={{ height: (dragMetaRef.current?.rowH ?? 68) - 8, marginBottom: 8, borderRadius: 14, background: 'var(--track)' }} />
                     ) : (
@@ -1283,7 +1350,8 @@ export default function Todos({ theme, onBack, onOpenCalendar, onOpenSpotlight, 
                     ),
                   )}
                 </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>

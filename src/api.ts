@@ -208,6 +208,8 @@ export interface Todo {
   sort_order: number
   employer_id: number | null
   project_id: number | null
+  note: string | null
+  steps: string | null // JSON-Array [{ text, done }]
   created_at: string
 }
 
@@ -217,6 +219,8 @@ export interface NewTodo {
   employer_id?: number | null
   project_id?: number | null
   done?: boolean
+  note?: string | null
+  steps?: string | null
 }
 
 export interface TodoPatch {
@@ -227,6 +231,8 @@ export interface TodoPatch {
   sort_order?: number
   employer_id?: number | null
   project_id?: number | null
+  note?: string | null
+  steps?: string | null
 }
 
 export interface NewEntry {

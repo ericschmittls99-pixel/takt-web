@@ -8,6 +8,8 @@ interface PatchTodoBody {
   sort_order?: unknown
   employer_id?: unknown
   project_id?: unknown
+  note?: unknown
+  steps?: unknown
 }
 
 function parseId(raw: string | string[]): number | null {
@@ -60,6 +62,14 @@ export const onRequestPatch: PagesFunction<Env, 'id'> = async ({
   if (body.project_id === null || typeof body.project_id === 'number') {
     fields.push('project_id = ?')
     values.push(body.project_id as number | null)
+  }
+  if (body.note === null || typeof body.note === 'string') {
+    fields.push('note = ?')
+    values.push(body.note === '' ? null : (body.note as string | null))
+  }
+  if (body.steps === null || typeof body.steps === 'string') {
+    fields.push('steps = ?')
+    values.push(body.steps === '' ? null : (body.steps as string | null))
   }
 
   if (fields.length === 0) return badRequest('Keine Felder zum Aktualisieren')
