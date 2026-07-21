@@ -84,12 +84,27 @@ export const onRequestDelete: PagesFunction<Env, 'id'> = async ({
   const id = parseId(params.id)
   if (id === null) return badRequest('Ungültige id')
 
-  const result = await env.DB.prepare(
-    'DELETE FROM time_entries WHERE id = ?',
-  )
+  // Konsistenzregeln (PROJECT_OVERVIEW 6.2): verknüpfte Aktivität behandeln.
+  const act = await env.DB
+    .prepare('SELECT id, source FROM activities WHERE entry_id = ?')
     .bind(id)
-    .run()
+    .first<{ id: number; source: string }>()
 
-  if (!result.meta.changes) return badRequest('Eintrag nicht gefunden', 404)
+  const stmts = []
+  if (act) {
+    if (act.source === 'manual') {
+      // Manuelle Aktivität existiert nur über diesen Eintrag -> mitlöschen.
+      stmts.push(env.DB.prepare('DELETE FROM activity_details WHERE activity_id = ?').bind(act.id))
+      stmts.push(env.DB.prepare('DELETE FROM activities WHERE id = ?').bind(act.id))
+    } else {
+      // Garmin-Aktivität bleibt erhalten -> trennen, zurück in die Inbox.
+      stmts.push(env.DB.prepare("UPDATE activities SET entry_id = NULL, status = 'inbox' WHERE id = ?").bind(act.id))
+    }
+  }
+  stmts.push(env.DB.prepare('DELETE FROM time_entries WHERE id = ?').bind(id))
+
+  const results = await env.DB.batch(stmts)
+  const del = results[results.length - 1]
+  if (!del.meta.changes) return badRequest('Eintrag nicht gefunden', 404)
   return new Response(null, { status: 204 })
 }
