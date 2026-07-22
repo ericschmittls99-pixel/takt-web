@@ -79,8 +79,7 @@ export default function Puls({ theme, onBack, onOpenTodos, onOpenCalendar, onOpe
   const [planned, setPlanned] = useState<PlannedBlock[]>([])
   const [overrides, setOverrides] = useState<PlannedOverride[]>([])
   const [deepId, setDeepId] = useState<number | null>(null)
-  const [typeFilter, setTypeFilter] = useState<string>('alle')
-  const [areaFilter, setAreaFilter] = useState<number | 'all'>('all')
+  const [areaFilter, setAreaFilter] = useState<number | 'all' | 'history'>('all')
   const [rangeFilter, setRangeFilter] = useState<'week' | 'month' | 'all'>('all')
 
   const todayKey = dayKey(new Date())
@@ -90,8 +89,10 @@ export default function Puls({ theme, onBack, onOpenTodos, onOpenCalendar, onOpe
     api.getGarminWorkouts().then(setWorkouts).catch(() => {})
     api.getPlanned().then(setPlanned).catch(() => {})
     api.getOverrides().then(setOverrides).catch(() => {})
-    api.getGarminDaily(todayKey, todayKey).then((r) => setDaily(r[0] ?? null)).catch(() => {})
-    api.getGarminSleep(todayKey, todayKey).then((r) => setSleep(r[0] ?? null)).catch(() => {})
+    // „Heute" = letzter verfügbarer Tag (heute ist evtl. noch nicht gesynct) -> jüngste Zeile (DESC).
+    const from3 = dayKey(addDays(new Date(), -3))
+    api.getGarminDaily(from3, todayKey).then((r) => setDaily(r[0] ?? null)).catch(() => {})
+    api.getGarminSleep(from3, todayKey).then((r) => setSleep(r[0] ?? null)).catch(() => {})
     const from40 = dayKey(addDays(new Date(), -40))
     api.getGarminSleep(from40, todayKey).then(setSleepRange).catch(() => {})
     api.getGarminScores(from40, todayKey).then(setScoresRange).catch(() => {})
@@ -130,7 +131,7 @@ export default function Puls({ theme, onBack, onOpenTodos, onOpenCalendar, onOpe
   const viewTitle = { heute: 'Heute', workouts: 'Workouts', schlaf: 'Schlaf & Erholung', trends: 'Trends' }[seg]
 
   return (
-    <div data-theme={theme} style={{ minHeight: '100vh', boxSizing: 'border-box', background: 'var(--screen)', color: 'var(--ink)', padding: '26px 40px 60px', zoom: 0.9 }}>
+    <div data-theme={theme} style={{ minHeight: '100vh', boxSizing: 'border-box', background: 'var(--screen)', color: 'var(--ink)', padding: '26px 40px 60px', zoom: 0.9, overflowX: 'hidden' }}>
       <div style={{ maxWidth: 1360, margin: '0 auto' }}>
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -159,8 +160,8 @@ export default function Puls({ theme, onBack, onOpenTodos, onOpenCalendar, onOpe
           <div style={{ fontSize: 44, fontWeight: 800, letterSpacing: '-1.4px', lineHeight: 1, marginTop: 6 }}>{viewTitle}</div>
         </div>
 
-        {seg === 'heute' && <Heute daily={daily} sleep={sleep} workouts={workouts} weekWorkouts={weekWorkouts} weekPlanned={weekPlanned} weekDates={weekDates} todayKey={todayKey} view={view} colorOf={colorOf} openWorkout={openWorkout} onOpenDay={onOpenDay} />}
-        {seg === 'workouts' && <Workouts workouts={workouts} employers={employers} view={view} colorOf={colorOf} openWorkout={openWorkout} typeFilter={typeFilter} setTypeFilter={setTypeFilter} areaFilter={areaFilter} setAreaFilter={setAreaFilter} rangeFilter={rangeFilter} setRangeFilter={setRangeFilter} monday={monday} />}
+        {seg === 'heute' && <Heute daily={daily} sleep={sleep} scores={scoresRange[0] ?? null} workouts={workouts} weekWorkouts={weekWorkouts} weekPlanned={weekPlanned} weekDates={weekDates} todayKey={todayKey} view={view} colorOf={colorOf} openWorkout={openWorkout} />}
+        {seg === 'workouts' && <Workouts workouts={workouts} employers={employers} view={view} colorOf={colorOf} openWorkout={openWorkout} areaFilter={areaFilter} setAreaFilter={setAreaFilter} rangeFilter={rangeFilter} setRangeFilter={setRangeFilter} monday={monday} />}
         {seg === 'schlaf' && <Schlaf sleepRange={sleepRange} scoresRange={scoresRange} />}
         {seg === 'trends' && <Trends />}
       </div>
@@ -204,7 +205,8 @@ function reco(daily: GarminDaily | null, workouts: Workout[]): { title: string; 
   return { title: 'Moderate Einheit', body: 'Solide Erholung — eine ausgewogene Einheit passt gut.', readiness: 'Mittel', dot: '#F59E0B' }
 }
 
-function Heute({ daily, sleep, workouts, weekWorkouts, weekPlanned, weekDates, todayKey, view, colorOf, openWorkout, onOpenDay }: any) {
+function fmtRecovery(v: number): string { if (v <= 0) return 'erholt'; if (v < 24) return `${v} Std`; return `${Math.floor(v / 24)} Tg ${v % 24} Std` }
+function Heute({ daily, sleep, scores, workouts, weekWorkouts, weekPlanned, weekDates, todayKey, view, colorOf, openWorkout }: any) {
   const kpis: ReactNode[] = []
   if (daily?.bb_high != null) kpis.push(<KpiCard key="bb" kickerText="Body Battery" emoji="🔋" tint={hexA('#22C55E', 0.15)} val={String(daily.bb_high)} unit="/ 100" color="#22C55E" barW={daily.bb_high} sub={daily.bb_low != null ? `Tief ${daily.bb_low} · Hoch ${daily.bb_high}` : 'Ladezustand'} />)
   if (daily?.stress_avg != null) kpis.push(<KpiCard key="st" kickerText="Stress" emoji="🌀" tint={hexA('#F59E0B', 0.15)} val={String(daily.stress_avg)} unit="/ 100" color="#F59E0B" barW={daily.stress_avg} sub={daily.stress_avg < 30 ? 'Niedrig' : daily.stress_avg < 60 ? 'Moderat' : 'Erhöht'} />)
@@ -217,9 +219,9 @@ function Heute({ daily, sleep, workouts, weekWorkouts, weekPlanned, weekDates, t
 
   return (
     <div>
-      {kpis.length > 0 && <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(kpis.length, 4)}, 1fr)`, gap: 18 }}>{kpis}</div>}
+      {kpis.length > 0 && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 18 }}>{kpis}</div>}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: 18, marginTop: kpis.length > 0 ? 18 : 0 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 18, marginTop: kpis.length > 0 ? 18 : 0 }}>
         {/* letztes Workout */}
         {last && lv && (
           <div onClick={() => openWorkout(last)} style={{ ...CARD, borderRadius: 26, padding: '24px 26px', cursor: 'pointer' }}>
@@ -250,11 +252,17 @@ function Heute({ daily, sleep, workouts, weekWorkouts, weekPlanned, weekDates, t
           <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-0.4px', marginTop: 14, lineHeight: 1.25 }}>{r.title}</div>
           <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink2)', marginTop: 10, lineHeight: 1.5 }}>{r.body}</div>
           <div style={{ flex: 1 }} />
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 20, flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', borderRadius: 12, background: 'var(--track)' }}>
               <div style={{ width: 9, height: 9, borderRadius: '50%', background: r.dot }} />
-              <div style={{ fontSize: 13, fontWeight: 800 }}>Bereitschaft: {r.readiness}</div>
+              <div style={{ fontSize: 13, fontWeight: 800 }}>Bereitschaft: {scores?.training_readiness_score != null ? `${scores.training_readiness_score}${scores.tr_level ? ` · ${scores.tr_level}` : ''}` : r.readiness}</div>
             </div>
+            {scores?.tr_recovery_time != null && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 14px', borderRadius: 12, background: 'var(--track)' }}>
+                <span style={{ fontSize: 13 }}>♻️</span>
+                <div style={{ fontSize: 13, fontWeight: 800 }}>Erholung: {fmtRecovery(scores.tr_recovery_time)}</div>
+              </div>
+            )}
             {sleep?.hrv_status && <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--ink3)' }}>HRV {sleep.hrv_status}{daily?.resting_hr ? ` · Ruhepuls ${daily.resting_hr}` : ''}</div>}
           </div>
         </div>
@@ -280,14 +288,14 @@ function Heute({ daily, sleep, workouts, weekWorkouts, weekPlanned, weekDates, t
             const dayPl = weekPlanned.filter((b: any) => dayKey(b.date) === k)
             const rest = dayWo.length === 0 && dayPl.length === 0
             return (
-              <div key={k} onClick={() => onOpenDay(startOfDay(d))} title="Zu diesem Tag in Mein Tag" style={{ borderRadius: 16, background: isToday ? 'color-mix(in srgb, var(--accent) 9%, var(--track))' : 'var(--track)', border: isToday ? '1.5px solid color-mix(in srgb, var(--accent) 45%, transparent)' : '1px solid var(--hair)', padding: '12px 10px', minHeight: 118, display: 'flex', flexDirection: 'column', cursor: 'pointer' }}>
+              <div key={k} style={{ borderRadius: 16, background: isToday ? 'color-mix(in srgb, var(--accent) 9%, var(--track))' : 'var(--track)', border: isToday ? '1.5px solid color-mix(in srgb, var(--accent) 45%, transparent)' : '1px solid var(--hair)', padding: '12px 10px', minHeight: 118, display: 'flex', flexDirection: 'column' }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
                   <div style={{ fontSize: 13, fontWeight: 800, color: isToday ? 'var(--accent)' : 'var(--ink2)' }}>{WD[d.getDay()]}</div>
                   <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--ink3)', fontVariantNumeric: 'tabular-nums' }}>{d.getDate()}.</div>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 11 }}>
                   {dayWo.map((w: Workout) => { const v = view(w); return (
-                    <div key={w.entry_id} title={v.name} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 9px', borderRadius: 10, background: hexA(v.color, 0.2), border: `1px solid ${hexA(v.color, 0.35)}` }}>
+                    <div key={`${w.origin}-${w.entry_id ?? w.activity_id}`} onClick={() => openWorkout(w)} title={`${v.name} – Details`} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 9px', borderRadius: 10, cursor: 'pointer', background: hexA(v.color, 0.2), border: `1px solid ${hexA(v.color, 0.35)}` }}>
                       <span style={{ fontSize: 13, lineHeight: 1 }}>{v.emoji}</span>
                       <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{Math.round(v.durMin)}′</span>
                     </div>
@@ -311,22 +319,21 @@ function Heute({ daily, sleep, workouts, weekWorkouts, weekPlanned, weekDates, t
 // ─────────────────────────────────────────────────────────────────────────────
 function loadColor(v: number) { return v < 45 ? '#22C55E' : v < 72 ? '#F59E0B' : '#EF4444' }
 
-function Workouts({ workouts, employers, view, colorOf, openWorkout, typeFilter, setTypeFilter, areaFilter, setAreaFilter, rangeFilter, setRangeFilter, monday }: any) {
+function Workouts({ workouts, employers, view, colorOf, openWorkout, areaFilter, setAreaFilter, rangeFilter, setRangeFilter, monday }: any) {
   const sportEmps: Employer[] = employers.filter((e: Employer) => e.is_sport === 1)
-  // Typ-Segmente aus den vorkommenden Typen ableiten (Alle + häufigste).
-  const typeSegs = useMemo(() => {
-    const counts = new Map<string, number>()
-    for (const w of workouts as Workout[]) { const key = w.type ? (TYPE_LABEL[w.type] ? w.type : 'sonstige') : 'sonstige'; counts.set(key, (counts.get(key) ?? 0) + 1) }
-    const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k]) => k)
-    return ['alle', ...top]
-  }, [workouts])
+  // Toggle = definierte Sport-Bereiche aus Mein Tag + eigener Tab für unzugeordnete Historie.
+  const segs: { val: 'all' | number | 'history'; label: string }[] = [
+    { val: 'all', label: 'Alle' },
+    ...sportEmps.map((e: Employer) => ({ val: e.id as number, label: e.name })),
+    { val: 'history', label: 'Historie (Keine Zuordnung)' },
+  ]
 
   const filtered = useMemo(() => (workouts as Workout[]).filter((w) => {
-    if (areaFilter !== 'all' && w.employer_id !== areaFilter) return false
-    if (typeFilter !== 'alle') { const key = w.type ? (TYPE_LABEL[w.type] ? w.type : 'sonstige') : 'sonstige'; if (key !== typeFilter) return false }
+    if (areaFilter === 'history') { if (w.origin !== 'history') return false }
+    else if (areaFilter !== 'all') { if (w.employer_id !== areaFilter) return false }
     if (rangeFilter !== 'all') { const monthAgo = new Date(); monthAgo.setDate(monthAgo.getDate() - 30); const cut = rangeFilter === 'week' ? dayKey(monday) : dayKey(monthAgo); if (dayKey(parseTs(w.start_ts)) < cut) return false }
     return true
-  }), [workouts, areaFilter, typeFilter, rangeFilter, monday])
+  }), [workouts, areaFilter, rangeFilter, monday])
 
   // Zeit-Kopplung: NUR zugeordnete time_entries (origin='entry'). Historie zählt hier NIE mit.
   const areaTime = useMemo(() => {
@@ -342,24 +349,21 @@ function Workouts({ workouts, employers, view, colorOf, openWorkout, typeFilter,
     return days.map((d, i) => ({ wd: WD[d.getDay()], v: per[i], h: `${Math.max(4, (per[i] / max) * 100)}%`, color: per[i] > 0 ? colorOf(filtered.find((w) => dayKey(parseTs(w.start_ts)) === dayKey(d))?.employer_id ?? 0) : 'var(--track)' }))
   }, [filtered, monday, colorOf])
 
-  const filterBtn: CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, padding: '9px 15px', borderRadius: 12, ...GLASS, fontSize: 13, fontWeight: 800, color: 'var(--ink2)', cursor: 'pointer' }
+  // Native <select> darf KEIN display:flex haben (bricht das Rendering) — eigener Stil.
+  const selBtn: CSSProperties = { ...GLASS, display: 'inline-block', padding: '9px 30px 9px 14px', borderRadius: 12, fontSize: 13, fontWeight: 800, color: 'var(--ink2)', cursor: 'pointer', appearance: 'none', WebkitAppearance: 'none', fontFamily: 'inherit', outline: 'none', maxWidth: '100%' }
   const cols = '2.4fr 0.9fr 0.9fr 0.9fr 0.9fr 0.8fr'
 
   return (
     <div>
       {/* Filter */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', padding: 4, gap: 3, borderRadius: 14, ...GLASS }}>
-          {typeSegs.map((t: string) => (
-            <div key={t} onClick={() => setTypeFilter(t)} style={{ padding: '7px 15px', borderRadius: 10, cursor: 'pointer', fontSize: 13, fontWeight: 800, background: typeFilter === t ? 'var(--seg-active, #fff)' : 'transparent', color: typeFilter === t ? 'var(--ink)' : 'var(--ink3)', boxShadow: typeFilter === t ? '0 4px 12px -4px rgba(17,24,39,0.28)' : 'none' }}>{t === 'alle' ? 'Alle' : (TYPE_LABEL[t] ?? 'Sonstige')}</div>
-          ))}
+        <div style={{ display: 'flex', flexWrap: 'wrap', padding: 4, gap: 3, borderRadius: 14, ...GLASS }}>
+          {segs.map((s) => { const on = areaFilter === s.val; return (
+            <div key={String(s.val)} onClick={() => setAreaFilter(s.val)} style={{ padding: '7px 15px', borderRadius: 10, cursor: 'pointer', fontSize: 13, fontWeight: 800, whiteSpace: 'nowrap', background: on ? 'var(--seg-active, #fff)' : 'transparent', color: on ? 'var(--ink)' : 'var(--ink3)', boxShadow: on ? '0 4px 12px -4px rgba(17,24,39,0.28)' : 'none' }}>{s.label}</div>
+          )})}
         </div>
         <div style={{ flex: 1 }} />
-        <select value={String(areaFilter)} onChange={(e) => setAreaFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))} style={{ ...filterBtn, appearance: 'none', paddingRight: 28 }}>
-          <option value="all">Bereich: Alle</option>
-          {sportEmps.map((e: Employer) => <option key={e.id} value={e.id}>{e.name}</option>)}
-        </select>
-        <select value={rangeFilter} onChange={(e) => setRangeFilter(e.target.value as 'week' | 'month' | 'all')} style={{ ...filterBtn, appearance: 'none', paddingRight: 28 }}>
+        <select value={rangeFilter} onChange={(e) => setRangeFilter(e.target.value as 'week' | 'month' | 'all')} style={selBtn}>
           <option value="week">Diese Woche</option>
           <option value="month">Letzte 30 Tage</option>
           <option value="all">Alle</option>
@@ -374,7 +378,7 @@ function Workouts({ workouts, employers, view, colorOf, openWorkout, typeFilter,
         {filtered.length === 0 && <div style={{ padding: '28px 24px', color: 'var(--ink3)', fontWeight: 700 }}>Keine Workouts für diese Filter.</div>}
         <div style={{ maxHeight: '52vh', overflowY: 'auto' }} className="no-scrollbar">
           {filtered.map((w: Workout) => { const v = view(w); const load = w.training_load != null ? Math.round(w.training_load) : null; return (
-            <div key={w.entry_id} onClick={() => openWorkout(w)} style={{ display: 'grid', gridTemplateColumns: cols, gap: 12, alignItems: 'center', padding: '15px 24px', borderBottom: '1px solid var(--hair)', cursor: 'pointer' }}>
+            <div key={`${w.origin}-${w.entry_id ?? w.activity_id}`} onClick={() => openWorkout(w)} style={{ display: 'grid', gridTemplateColumns: cols, gap: 12, alignItems: 'center', padding: '15px 24px', borderBottom: '1px solid var(--hair)', cursor: 'pointer' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
                 <div style={{ width: 42, height: 42, borderRadius: 13, display: 'grid', placeItems: 'center', fontSize: 20, background: hexA(v.color, 0.16), flex: 'none' }}>{v.emoji}</div>
                 <div style={{ minWidth: 0 }}>
@@ -398,7 +402,7 @@ function Workouts({ workouts, employers, view, colorOf, openWorkout, typeFilter,
       </div>
 
       {/* Zeit-Kopplung */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.3fr', gap: 18, marginTop: 18 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 18, marginTop: 18 }}>
         <div style={{ ...CARD, borderRadius: 24, padding: '22px 24px' }}>
           <div style={kicker}>Trainingszeit pro Bereich</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 20 }}>
@@ -571,7 +575,7 @@ function Schlaf({ sleepRange, scoresRange }: { sleepRange: GarminSleep[]; scores
             ))}
           </div>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 14 }}>
           {trendDefs.map((t) => {
             const series = chrono.map(t.get).filter((v): v is number => v != null)
             if (series.length === 0) return <div key={t.label} style={{ background: 'var(--track)', borderRadius: 18, padding: '16px 18px', color: 'var(--ink3)', fontWeight: 700, fontSize: 12.5 }}>{t.label} · keine Daten</div>
@@ -601,28 +605,58 @@ function Schlaf({ sleepRange, scoresRange }: { sleepRange: GarminSleep[]; scores
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Trends-Widget-Dashboard (WP4d-1: Geruest + Mechanik, Dummy-Inhalt)
+// Trends-Widget-Dashboard (WP4d-2: echte Datenbindung + Zoom-Modal)
 type WType = 'sparkline' | 'tagesverlauf' | 'score-gauge' | 'kennzahl-ziel'
-interface WidgetDef { id: string; name: string; icon: string; type: WType; defaultVisible: boolean; group: 'A' | 'B' }
+type Src = 'daily' | 'sleep' | 'scores'
+interface WidgetDef {
+  id: string; name: string; icon: string; type: WType; group: 'A' | 'B'; defaultVisible: boolean
+  src: Src
+  get: (r: Record<string, unknown>) => number | null
+  unit?: string; decimals?: number; goodDir?: 'up' | 'down'
+  gaugeMax?: number
+  target?: (r: Record<string, unknown>) => number | null
+  fmt?: (v: number) => string
+  special?: 'vo2max' | 'load' | 'race' | 'status'
+}
+const numN = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+const fmtMMSS = (sec: number) => `${Math.floor(sec / 60)}:${pad(Math.round(sec % 60))}`
+
 const WIDGETS: WidgetDef[] = [
-  { id: 'vo2max', name: 'VO2max', icon: '📈', type: 'sparkline', defaultVisible: true, group: 'A' },
-  { id: 'endurance', name: 'Endurance Score', icon: '🏅', type: 'sparkline', defaultVisible: true, group: 'A' },
-  { id: 'hill', name: 'Hill Score', icon: '⛰️', type: 'sparkline', defaultVisible: true, group: 'A' },
-  { id: 'readiness', name: 'Training Readiness', icon: '✅', type: 'score-gauge', defaultVisible: true, group: 'A' },
-  { id: 'fitness_age', name: 'Fitness Age', icon: '🎂', type: 'kennzahl-ziel', defaultVisible: true, group: 'A' },
-  { id: 'training_load', name: 'Trainingslast', icon: '🔥', type: 'tagesverlauf', defaultVisible: true, group: 'A' },
-  { id: 'race', name: 'Race Predictions', icon: '🏁', type: 'sparkline', defaultVisible: true, group: 'A' },
-  { id: 'hrv', name: 'HRV-Trend', icon: '💓', type: 'sparkline', defaultVisible: false, group: 'B' },
-  { id: 'resting_hr', name: 'Ruhepuls', icon: '❤️', type: 'sparkline', defaultVisible: false, group: 'B' },
-  { id: 'sleep_score', name: 'Schlaf-Score', icon: '😴', type: 'sparkline', defaultVisible: false, group: 'B' },
-  { id: 'stress', name: 'Stress-Verlauf', icon: '🌀', type: 'tagesverlauf', defaultVisible: false, group: 'B' },
-  { id: 'weight', name: 'Gewicht', icon: '⚖️', type: 'kennzahl-ziel', defaultVisible: false, group: 'B' },
+  // Gruppe A — garmin_daily / garmin_sleep
+  { id: 'resting_hr', name: 'Ruhepuls', icon: '❤️', type: 'sparkline', group: 'A', defaultVisible: true, src: 'daily', get: (r) => numN(r.resting_hr), unit: 'bpm', goodDir: 'down' },
+  { id: 'hrv', name: 'HRV', icon: '💓', type: 'sparkline', group: 'A', defaultVisible: true, src: 'sleep', get: (r) => numN(r.hrv_overnight_avg), unit: 'ms', goodDir: 'up' },
+  { id: 'stress', name: 'Stress', icon: '🌀', type: 'tagesverlauf', group: 'A', defaultVisible: false, src: 'daily', get: (r) => numN(r.stress_avg), goodDir: 'down' },
+  { id: 'body_battery', name: 'Body Battery', icon: '🔋', type: 'tagesverlauf', group: 'A', defaultVisible: true, src: 'daily', get: (r) => numN(r.bb_high), goodDir: 'up' },
+  { id: 'steps', name: 'Schritte', icon: '👣', type: 'kennzahl-ziel', group: 'A', defaultVisible: false, src: 'daily', get: (r) => numN(r.steps), target: (r) => numN(r.step_goal), goodDir: 'up' },
+  { id: 'sleep_score', name: 'Schlaf-Score', icon: '😴', type: 'sparkline', group: 'A', defaultVisible: true, src: 'sleep', get: (r) => numN(r.score), goodDir: 'up' },
+  { id: 'spo2', name: 'SpO₂', icon: '🫁', type: 'sparkline', group: 'A', defaultVisible: false, src: 'daily', get: (r) => numN(r.spo2_avg), unit: '%', goodDir: 'up' },
+  { id: 'respiration', name: 'Atmung', icon: '🌬️', type: 'sparkline', group: 'A', defaultVisible: false, src: 'daily', get: (r) => numN(r.respiration_waking_avg), unit: '/min', goodDir: 'down' },
+  { id: 'intensity', name: 'Intensitätsminuten', icon: '⚡', type: 'kennzahl-ziel', group: 'A', defaultVisible: false, src: 'daily', get: (r) => (numN(r.intensity_moderate_min) ?? 0) + (numN(r.intensity_vigorous_min) ?? 0), target: () => 150, goodDir: 'up' },
+  { id: 'calories', name: 'Aktive Kalorien', icon: '🔥', type: 'sparkline', group: 'A', defaultVisible: false, src: 'daily', get: (r) => numN(r.calories_active), unit: 'kcal', goodDir: 'up' },
+  { id: 'floors', name: 'Etagen', icon: '🪜', type: 'sparkline', group: 'A', defaultVisible: false, src: 'daily', get: (r) => numN(r.floors_ascended), goodDir: 'up' },
+  // Gruppe B — garmin_scores
+  { id: 'readiness', name: 'Training Readiness', icon: '✅', type: 'score-gauge', group: 'B', defaultVisible: true, src: 'scores', get: (r) => numN(r.training_readiness_score), gaugeMax: 100, goodDir: 'up' },
+  { id: 'vo2max', name: 'VO2max', icon: '📈', type: 'sparkline', group: 'B', defaultVisible: true, src: 'scores', get: (r) => numN(r.vo2max), goodDir: 'up', special: 'vo2max' },
+  { id: 'endurance', name: 'Endurance Score', icon: '🏅', type: 'sparkline', group: 'B', defaultVisible: true, src: 'scores', get: (r) => numN(r.endurance_score), goodDir: 'up' },
+  { id: 'hill', name: 'Hill Score', icon: '⛰️', type: 'sparkline', group: 'B', defaultVisible: false, src: 'scores', get: (r) => numN(r.hill_score), goodDir: 'up' },
+  { id: 'fitness_age', name: 'Fitness Age', icon: '🎂', type: 'kennzahl-ziel', group: 'B', defaultVisible: true, src: 'scores', get: (r) => numN(r.fitness_age), target: (r) => numN(r.fitness_age_chronological), goodDir: 'down', fmt: (v) => v.toFixed(1).replace('.', ',') },
+  { id: 'race', name: 'Race Predictions', icon: '🏁', type: 'sparkline', group: 'B', defaultVisible: false, src: 'scores', get: (r) => numN(r.race_5k_sec), goodDir: 'down', fmt: fmtMMSS },
+  { id: 'training_status', name: 'Training Status', icon: '🧭', type: 'kennzahl-ziel', group: 'B', defaultVisible: false, src: 'scores', get: (r) => numN(r.training_status_code), special: 'status' },
+  { id: 'load', name: 'Trainingslast (ACWR)', icon: '📊', type: 'sparkline', group: 'B', defaultVisible: true, src: 'scores', get: (r) => numN(r.tr_acute_load), goodDir: 'up', special: 'load' },
 ]
 const WMAP = new Map(WIDGETS.map((w) => [w.id, w]))
-type Layout = { visible: string[]; hidden: string[] }
-function defaultLayout(): Layout {
-  return { visible: WIDGETS.filter((w) => w.defaultVisible).map((w) => w.id), hidden: WIDGETS.filter((w) => !w.defaultVisible).map((w) => w.id) }
+const STATUS_LABEL: Record<number, string> = { 0: 'Kein Status', 1: 'Formverlust', 2: 'Unproduktiv', 3: 'Formerhalt', 4: 'Produktiv', 5: 'Höchstform', 6: 'Überlastung', 7: 'Erholung', 8: 'Angespannt' }
+const ACWR_INFO = (p: number | null) => {
+  if (p == null) return { label: '—', color: 'var(--ink3)' }
+  const r = p / 100
+  if (r < 0.8) return { label: 'wenig', color: '#F59E0B' }
+  if (r <= 1.3) return { label: 'optimal', color: '#22C55E' }
+  if (r <= 1.5) return { label: 'erhöht', color: '#F59E0B' }
+  return { label: 'hoch', color: '#EF4444' }
 }
+
+type Layout = { visible: string[]; hidden: string[] }
+function defaultLayout(): Layout { return { visible: WIDGETS.filter((w) => w.defaultVisible).map((w) => w.id), hidden: WIDGETS.filter((w) => !w.defaultVisible).map((w) => w.id) } }
 function reconcile(l: Layout): Layout {
   const known = new Set(WIDGETS.map((w) => w.id))
   const visible = (l.visible || []).filter((id) => known.has(id))
@@ -631,60 +665,151 @@ function reconcile(l: Layout): Layout {
   for (const w of WIDGETS) if (!placed.has(w.id)) (w.defaultVisible ? visible : hidden).push(w.id)
   return { visible, hidden }
 }
-function dummySeries(id: string, n = 12): number[] {
-  let s = 7
-  for (const c of id) s = (s * 31 + c.charCodeAt(0)) & 0x7fffffff
-  const out: number[] = []
-  let v = 50
-  for (let i = 0; i < n; i++) { s = (s * 1103515245 + 12345) & 0x7fffffff; v += ((s % 1000) / 1000 - 0.45) * 12; v = Math.max(20, Math.min(90, v)); out.push(Math.round(v)) }
+
+type Maps = Record<Src, Map<string, Record<string, unknown>>>
+function buildSeries(w: WidgetDef, maps: Maps, days: number): (number | null)[] {
+  const out: (number | null)[] = []
+  for (let i = days - 1; i >= 0; i--) {
+    const r = maps[w.src].get(dayKey(addDays(new Date(), -i)))
+    out.push(r ? w.get(r) : null)
+  }
   return out
 }
+function statsOf(vals: (number | null)[]) {
+  const nn = vals.filter((v): v is number => v != null)
+  if (nn.length === 0) return null
+  return { min: Math.min(...nn), max: Math.max(...nn), avg: nn.reduce((a, b) => a + b, 0) / nn.length, last: nn[nn.length - 1], n: nn.length }
+}
+function linePathGapped(vals: (number | null)[], w: number, h: number, p = 3): string {
+  const nn = vals.filter((v): v is number => v != null)
+  if (nn.length < 2) return ''
+  const mn = Math.min(...nn), mx = Math.max(...nn), r = mx - mn || 1, sx = w / (vals.length - 1)
+  let d = '', pen = false
+  vals.forEach((v, i) => { if (v == null) { pen = false; return } const x = i * sx, y = p + (h - 2 * p) - ((v - mn) / r) * (h - 2 * p); d += `${pen ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)} `; pen = true })
+  return d.trim()
+}
+// Messpunkte (Wertwechsel) für VO2max-Fortschreibungs-Kennzeichnung.
+function changeDots(vals: (number | null)[], w: number, h: number, p = 3): { x: number; y: number }[] {
+  const nn = vals.filter((v): v is number => v != null)
+  if (nn.length < 2) return []
+  const mn = Math.min(...nn), mx = Math.max(...nn), r = mx - mn || 1, sx = w / (vals.length - 1)
+  const dots: { x: number; y: number }[] = []
+  let prev: number | null = null
+  vals.forEach((v, i) => { if (v == null) return; if (prev == null || v !== prev) dots.push({ x: i * sx, y: p + (h - 2 * p) - ((v - mn) / r) * (h - 2 * p) }); prev = v })
+  return dots
+}
+function fmtVal(w: WidgetDef, v: number): string { return w.fmt ? w.fmt(v) : `${w.decimals != null ? v.toFixed(w.decimals) : Math.round(v)}${w.unit ? ' ' + w.unit : ''}` }
 
-function WidgetBody({ w }: { w: WidgetDef }) {
+function WidgetBody({ w, maps }: { w: WidgetDef; maps: Maps }) {
   const accent = 'var(--accent)'
-  if (w.type === 'sparkline') {
-    const s = dummySeries(w.id)
-    return (
-      <div>
-        <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: '-1px', fontVariantNumeric: 'tabular-nums' }}>{s[s.length - 1]}</div>
-        <svg width="100%" height="46" viewBox="0 0 200 46" preserveAspectRatio="none" style={{ display: 'block', overflow: 'visible', marginTop: 8 }}>
-          <path d={sparkPath(s, 200, 46, 4)} fill="none" stroke={accent} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </div>
-    )
+  const vals = buildSeries(w, maps, 90)
+  const st = statsOf(vals)
+  if (!st) return <div style={{ marginTop: 10, fontSize: 12.5, fontWeight: 700, color: 'var(--ink3)' }}>Keine Daten im Zeitraum.</div>
+
+  if (w.special === 'status') {
+    const label = STATUS_LABEL[Math.round(st.last)] ?? `Status ${st.last}`
+    return <div style={{ marginTop: 8 }}><div style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.5px' }}>{label}</div><div style={{ ...kicker, fontSize: 10, marginTop: 6 }}>aktueller Status</div></div>
   }
-  if (w.type === 'tagesverlauf') {
-    const s = dummySeries(w.id, 7)
-    const mx = Math.max(...s)
-    return (
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 70, marginTop: 6 }}>
-        {s.map((v, i) => <div key={i} style={{ flex: 1, height: `${(v / mx) * 100}%`, background: accent, borderRadius: '6px 6px 3px 3px', opacity: 0.85 }} />)}
-      </div>
-    )
-  }
+
   if (w.type === 'score-gauge') {
-    const frac = dummySeries(w.id, 1)[0] / 100
+    const frac = Math.max(0, Math.min(1, st.last / (w.gaugeMax ?? 100)))
     const len = 141
     return (
       <div style={{ position: 'relative', display: 'grid', placeItems: 'center', marginTop: 4 }}>
-        <svg width="130" height="72" viewBox="0 0 100 56">
-          <path d="M6 50 A44 44 0 0 1 94 50" fill="none" stroke="var(--track)" strokeWidth="9" strokeLinecap="round" />
-          <path d="M6 50 A44 44 0 0 1 94 50" fill="none" stroke={accent} strokeWidth="9" strokeLinecap="round" strokeDasharray={`${(frac * len).toFixed(1)} ${len}`} />
-        </svg>
-        <div style={{ position: 'absolute', top: 30, fontSize: 26, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{Math.round(frac * 100)}</div>
+        <svg width="130" height="72" viewBox="0 0 100 56"><path d="M6 50 A44 44 0 0 1 94 50" fill="none" stroke="var(--track)" strokeWidth="9" strokeLinecap="round" /><path d="M6 50 A44 44 0 0 1 94 50" fill="none" stroke={accent} strokeWidth="9" strokeLinecap="round" strokeDasharray={`${(frac * len).toFixed(1)} ${len}`} /></svg>
+        <div style={{ position: 'absolute', top: 30, fontSize: 26, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{Math.round(st.last)}</div>
       </div>
     )
   }
-  // kennzahl-ziel
-  const val = dummySeries(w.id, 1)[0]
-  return (
-    <div style={{ marginTop: 6 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
-        <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: '-1px', fontVariantNumeric: 'tabular-nums' }}>{val}</div>
-        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink3)' }}>/ Ziel {Math.round(val * 1.15)}</div>
+
+  if (w.type === 'kennzahl-ziel') {
+    const lastRow = maps[w.src].get(dayKey(new Date())) ?? [...maps[w.src].values()][0]
+    const target = w.target && lastRow ? w.target(lastRow) : null
+    return (
+      <div style={{ marginTop: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
+          <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: '-1px', fontVariantNumeric: 'tabular-nums' }}>{fmtVal(w, st.last)}</div>
+          {target != null && <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink3)' }}>{w.id === 'fitness_age' ? `vs. ${target} J.` : `/ ${Math.round(target)}`}</div>}
+        </div>
+        {target != null && target > 0 && <div style={{ height: 8, borderRadius: 99, background: 'var(--track)', marginTop: 12, overflow: 'hidden' }}><div style={{ height: '100%', width: `${Math.min(100, (st.last / target) * 100)}%`, background: accent, borderRadius: 99 }} /></div>}
       </div>
-      <div style={{ height: 8, borderRadius: 99, background: 'var(--track)', marginTop: 12, overflow: 'hidden' }}>
-        <div style={{ height: '100%', width: `${Math.min(100, (val / (val * 1.15)) * 100)}%`, background: accent, borderRadius: 99 }} />
+    )
+  }
+
+  if (w.type === 'tagesverlauf') {
+    const last = vals.slice(-30)
+    const mx = Math.max(1, ...last.filter((v): v is number => v != null))
+    return (
+      <div>
+        <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: '-0.6px', fontVariantNumeric: 'tabular-nums' }}>{fmtVal(w, st.last)}</div>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 46, marginTop: 8 }}>
+          {last.map((v, i) => <div key={i} style={{ flex: 1, height: v != null ? `${(v / mx) * 100}%` : 0, background: accent, borderRadius: '3px 3px 1px 1px', opacity: 0.85 }} />)}
+        </div>
+      </div>
+    )
+  }
+
+  // sparkline (+ vo2max Messpunkte)
+  const dots = w.special === 'vo2max' ? changeDots(vals, 200, 46, 4) : []
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+        <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.9px', fontVariantNumeric: 'tabular-nums' }}>{fmtVal(w, st.last)}</div>
+        {w.special === 'load' && (() => { const p = numN((maps.scores.get(dayKey(new Date())) ?? [...maps.scores.values()][0] ?? {}).tr_acwr_percent); const a = ACWR_INFO(p); return <div style={{ fontSize: 11, fontWeight: 800, padding: '2px 8px', borderRadius: 7, background: `color-mix(in srgb, ${a.color} 16%, transparent)`, color: a.color }}>ACWR {a.label}</div> })()}
+      </div>
+      <svg width="100%" height="46" viewBox="0 0 200 46" preserveAspectRatio="none" style={{ display: 'block', overflow: 'visible', marginTop: 8 }}>
+        <path d={linePathGapped(vals, 200, 46, 4)} fill="none" stroke={accent} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+        {dots.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r="2.6" fill={accent} />)}
+      </svg>
+      {w.special === 'vo2max' && <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink3)', marginTop: 4 }}>Punkte = gemessen · Linie fortgeschrieben</div>}
+    </div>
+  )
+}
+
+function ZoomModal({ w, maps, onClose }: { w: WidgetDef; maps: Maps; onClose: () => void }) {
+  const [period, setPeriod] = useState<'week' | 'month' | 'year' | 'all'>('month')
+  useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k) }, [onClose])
+  const days = period === 'week' ? 7 : period === 'month' ? 30 : 365
+  const vals = buildSeries(w, maps, days)
+  const st = statsOf(vals)
+  const dots = w.special === 'vo2max' ? changeDots(vals, 900, 260, 10) : []
+  const bars = w.type === 'tagesverlauf'
+  const mx = Math.max(1, ...vals.filter((v): v is number => v != null))
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 320, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 40, background: 'var(--veil)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)' }}>
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0 }} />
+      <div onClick={(e) => e.stopPropagation()} style={{ position: 'relative', zIndex: 2, width: 960, maxWidth: '100%', borderRadius: 28, background: 'var(--glass-strong)', backdropFilter: 'blur(30px) saturate(180%)', WebkitBackdropFilter: 'blur(30px) saturate(180%)', border: '1px solid var(--border)', boxShadow: 'var(--shadow)', padding: '24px 28px', animation: 'popIn .2s ease' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ width: 40, height: 40, borderRadius: 12, display: 'grid', placeItems: 'center', fontSize: 20, background: 'var(--track)' }}>{w.icon}</div>
+          <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.5px', flex: 1 }}>{w.name}</div>
+          <div style={{ display: 'flex', padding: 3, gap: 3, borderRadius: 12, background: 'var(--track)' }}>
+            {(['week', 'month', 'year', 'all'] as const).map((p) => <div key={p} onClick={() => setPeriod(p)} style={{ padding: '7px 13px', borderRadius: 9, fontSize: 12.5, fontWeight: 800, cursor: 'pointer', color: period === p ? 'var(--ink)' : 'var(--ink3)', background: period === p ? 'var(--seg-active, #fff)' : 'transparent' }}>{{ week: 'Woche', month: 'Monat', year: 'Jahr', all: 'Alles' }[p]}</div>)}
+          </div>
+          <div onClick={onClose} style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--track)', display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--ink2)' }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg></div>
+        </div>
+
+        <div style={{ background: 'var(--card)', border: '1px solid var(--hair)', borderRadius: 18, padding: '18px 16px', marginTop: 20 }}>
+          {st ? (
+            bars ? (
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 1, height: 260 }}>{vals.map((v, i) => <div key={i} style={{ flex: 1, height: v != null ? `${(v / mx) * 100}%` : 0, background: 'var(--accent)', opacity: 0.85, borderRadius: '2px 2px 0 0' }} />)}</div>
+            ) : (
+              <svg width="100%" height="260" viewBox="0 0 900 260" preserveAspectRatio="none" style={{ display: 'block', overflow: 'visible' }}>
+                <path d={linePathGapped(vals, 900, 260, 10)} fill="none" stroke="var(--accent)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+                {dots.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r="3.4" fill="var(--accent)" />)}
+              </svg>
+            )
+          ) : <div style={{ height: 260, display: 'grid', placeItems: 'center', color: 'var(--ink3)', fontWeight: 700 }}>Keine Daten im Zeitraum.</div>}
+        </div>
+
+        {st && (
+          <div style={{ display: 'flex', gap: 30, marginTop: 18 }}>
+            {([['Min', st.min], ['Schnitt', st.avg], ['Max', st.max]] as const).map(([k, v]) => (
+              <div key={k}><div style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.5px', fontVariantNumeric: 'tabular-nums' }}>{fmtVal(w, v)}</div><div style={{ ...kicker, fontSize: 10.5, marginTop: 3 }}>{k}</div></div>
+            ))}
+            <div style={{ flex: 1 }} />
+            <div style={{ alignSelf: 'flex-end', fontSize: 12, fontWeight: 700, color: 'var(--ink3)' }}>{st.n} Tage mit Daten</div>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -695,50 +820,46 @@ function Trends() {
   const [editing, setEditing] = useState(false)
   const [catalogOpen, setCatalogOpen] = useState(false)
   const [dragIdx, setDragIdx] = useState<number | null>(null)
+  const [zoom, setZoom] = useState<string | null>(null)
+  const [daily, setDaily] = useState<Record<string, unknown>[]>([])
+  const [sleepR, setSleepR] = useState<Record<string, unknown>[]>([])
+  const [scores, setScores] = useState<Record<string, unknown>[]>([])
 
   useEffect(() => {
     api.getSettings().then((s) => {
-      try { const p = JSON.parse(s.puls_trends_layout || 'null'); if (p && Array.isArray(p.visible)) { setLayout(reconcile(p)); return } } catch { /* fällt auf Default */ }
+      try { const p = JSON.parse(s.puls_trends_layout || 'null'); if (p && Array.isArray(p.visible)) { setLayout(reconcile(p)); return } } catch { /* Default */ }
       const def = defaultLayout(); setLayout(def); void api.updateSettings({ puls_trends_layout: JSON.stringify(def) })
     }).catch(() => setLayout(defaultLayout()))
+    const from = dayKey(addDays(new Date(), -365)), to = dayKey(new Date())
+    api.getGarminDaily(from, to).then((r) => setDaily(r as unknown as Record<string, unknown>[])).catch(() => {})
+    api.getGarminSleep(from, to).then((r) => setSleepR(r as unknown as Record<string, unknown>[])).catch(() => {})
+    api.getGarminScores(from, to).then((r) => setScores(r as unknown as Record<string, unknown>[])).catch(() => {})
   }, [])
 
-  function persist(next: Layout) {
-    setLayout(next)
-    void api.updateSettings({ puls_trends_layout: JSON.stringify(next) })
-  }
+  const maps = useMemo<Maps>(() => ({
+    daily: new Map(daily.map((r) => [String(r.calendar_date), r])),
+    sleep: new Map(sleepR.map((r) => [String(r.calendar_date), r])),
+    scores: new Map(scores.map((r) => [String(r.calendar_date), r])),
+  }), [daily, sleepR, scores])
+
+  function persist(next: Layout) { setLayout(next); void api.updateSettings({ puls_trends_layout: JSON.stringify(next) }) }
   function remove(id: string) { if (!layout) return; persist({ visible: layout.visible.filter((x) => x !== id), hidden: [id, ...layout.hidden.filter((x) => x !== id)] }) }
   function add(id: string) { if (!layout) return; persist({ visible: [...layout.visible.filter((x) => x !== id), id], hidden: layout.hidden.filter((x) => x !== id) }) }
-  function reorder(from: number, to: number) {
-    if (!layout || from === to) return
-    const v = [...layout.visible]
-    const [m] = v.splice(from, 1)
-    v.splice(to, 0, m)
-    setLayout({ visible: v, hidden: layout.hidden })
-  }
+  function reorder(from: number, to: number) { if (!layout || from === to) return; const v = [...layout.visible]; const [m] = v.splice(from, 1); v.splice(to, 0, m); setLayout({ visible: v, hidden: layout.hidden }) }
 
   if (!layout) return <div style={{ ...CARD, borderRadius: 24, padding: '48px 26px', textAlign: 'center', color: 'var(--ink3)', fontWeight: 700 }}>Lädt…</div>
-
   const editBtn: CSSProperties = { display: 'flex', alignItems: 'center', gap: 7, padding: '9px 15px', borderRadius: 12, fontSize: 13, fontWeight: 800, cursor: 'pointer' }
+  const zoomW = zoom ? WMAP.get(zoom) : undefined
 
   return (
     <div>
-      {/* Toolbar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
         <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--ink2)' }}>{layout.visible.length} Widgets</div>
         <div style={{ flex: 1 }} />
-        {editing && (
-          <div onClick={() => setCatalogOpen(true)} style={{ ...editBtn, background: 'color-mix(in srgb, var(--accent) 13%, transparent)', border: '1px solid color-mix(in srgb, var(--accent) 32%, transparent)', color: 'var(--accent)' }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
-            Widget hinzufügen
-          </div>
-        )}
-        <div onClick={() => setEditing((e) => !e)} style={{ ...editBtn, ...GLASS, color: editing ? 'var(--accent)' : 'var(--ink2)', borderColor: editing ? 'color-mix(in srgb, var(--accent) 40%, transparent)' : 'var(--hair)' }}>
-          {editing ? 'Fertig' : 'Bearbeiten'}
-        </div>
+        {editing && <div onClick={() => setCatalogOpen(true)} style={{ ...editBtn, background: 'color-mix(in srgb, var(--accent) 13%, transparent)', border: '1px solid color-mix(in srgb, var(--accent) 32%, transparent)', color: 'var(--accent)' }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>Widget hinzufügen</div>}
+        <div onClick={() => setEditing((e) => !e)} style={{ ...editBtn, ...GLASS, color: editing ? 'var(--accent)' : 'var(--ink2)', borderColor: editing ? 'color-mix(in srgb, var(--accent) 40%, transparent)' : 'var(--hair)' }}>{editing ? 'Fertig' : 'Bearbeiten'}</div>
       </div>
 
-      {/* Raster */}
       {layout.visible.length === 0 ? (
         <div style={{ ...CARD, borderRadius: 24, padding: '56px 26px', textAlign: 'center' }}>
           <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--ink)' }}>Keine Widgets</div>
@@ -746,67 +867,42 @@ function Trends() {
           <div onClick={() => { setEditing(true); setCatalogOpen(true) }} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, marginTop: 18, padding: '10px 18px', borderRadius: 12, background: 'var(--accent)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>+ Widget hinzufügen</div>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 18 }}>
-          {layout.visible.map((id, i) => {
-            const w = WMAP.get(id)
-            if (!w) return null
-            return (
-              <div
-                key={id}
-                draggable={editing}
-                onDragStart={() => setDragIdx(i)}
-                onDragOver={(e) => { if (!editing || dragIdx === null) return; e.preventDefault(); if (dragIdx !== i) { reorder(dragIdx, i); setDragIdx(i) } }}
-                onDragEnd={() => { setDragIdx(null); setLayout((cur) => { if (cur) void api.updateSettings({ puls_trends_layout: JSON.stringify(cur) }); return cur }) }}
-                style={{ ...CARD, borderRadius: 22, padding: '18px 20px', opacity: dragIdx === i ? 0.5 : 1, cursor: editing ? 'grab' : 'default', outline: editing ? '1.5px dashed var(--hair)' : 'none' }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-                  <div style={{ width: 30, height: 30, borderRadius: 9, display: 'grid', placeItems: 'center', fontSize: 15, background: 'var(--track)' }}>{w.icon}</div>
-                  <div style={{ fontSize: 13.5, fontWeight: 800, color: 'var(--ink)', flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{w.name}</div>
-                  {editing ? (
-                    <>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style={{ color: 'var(--ink3)', flex: 'none' }}><circle cx="9" cy="6" r="1.6" /><circle cx="15" cy="6" r="1.6" /><circle cx="9" cy="12" r="1.6" /><circle cx="15" cy="12" r="1.6" /><circle cx="9" cy="18" r="1.6" /><circle cx="15" cy="18" r="1.6" /></svg>
-                      <div onClick={() => remove(id)} title="Entfernen" style={{ width: 24, height: 24, borderRadius: 7, display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#E5484D', background: 'var(--track)', flex: 'none' }}>
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
-                      </div>
-                    </>
-                  ) : <div style={{ ...kicker, fontSize: 9.5, color: 'var(--ink3)' }}>{w.type}</div>}
-                </div>
-                <WidgetBody w={w} />
-                <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--ink3)', marginTop: 12 }}>Platzhalter · echte Daten in WP4d-2</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 18 }}>
+          {layout.visible.map((id, i) => { const w = WMAP.get(id); if (!w) return null; return (
+            <div key={id} draggable={editing} onDragStart={() => setDragIdx(i)} onDragOver={(e) => { if (!editing || dragIdx === null) return; e.preventDefault(); if (dragIdx !== i) { reorder(dragIdx, i); setDragIdx(i) } }} onDragEnd={() => { setDragIdx(null); setLayout((cur) => { if (cur) void api.updateSettings({ puls_trends_layout: JSON.stringify(cur) }); return cur }) }} onClick={() => { if (!editing) setZoom(id) }} style={{ ...CARD, borderRadius: 22, padding: '18px 20px', opacity: dragIdx === i ? 0.5 : 1, cursor: editing ? 'grab' : 'pointer', outline: editing ? '1.5px dashed var(--hair)' : 'none' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                <div style={{ width: 30, height: 30, borderRadius: 9, display: 'grid', placeItems: 'center', fontSize: 15, background: 'var(--track)' }}>{w.icon}</div>
+                <div style={{ fontSize: 13.5, fontWeight: 800, color: 'var(--ink)', flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{w.name}</div>
+                {editing ? (<>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style={{ color: 'var(--ink3)', flex: 'none' }}><circle cx="9" cy="6" r="1.6" /><circle cx="15" cy="6" r="1.6" /><circle cx="9" cy="12" r="1.6" /><circle cx="15" cy="12" r="1.6" /><circle cx="9" cy="18" r="1.6" /><circle cx="15" cy="18" r="1.6" /></svg>
+                  <div onClick={(e) => { e.stopPropagation(); remove(id) }} title="Entfernen" style={{ width: 24, height: 24, borderRadius: 7, display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#E5484D', background: 'var(--track)', flex: 'none' }}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg></div>
+                </>) : <div style={{ ...kicker, fontSize: 9.5, color: 'var(--ink3)' }}>{w.type}</div>}
               </div>
-            )
-          })}
+              <WidgetBody w={w} maps={maps} />
+            </div>
+          ) })}
         </div>
       )}
 
-      {/* Katalog */}
       {catalogOpen && (
         <div onClick={() => setCatalogOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'var(--veil)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 40 }}>
           <div onClick={(e) => e.stopPropagation()} className="no-scrollbar" style={{ width: 560, maxWidth: '100%', maxHeight: '84vh', overflowY: 'auto', borderRadius: 26, background: 'var(--glass-strong)', backdropFilter: 'blur(30px) saturate(180%)', WebkitBackdropFilter: 'blur(30px) saturate(180%)', border: '1px solid var(--border)', boxShadow: 'var(--shadow)', animation: 'popIn .2s ease' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '22px 24px 14px', borderBottom: '1px solid var(--hair)' }}>
               <div style={{ fontSize: 19, fontWeight: 800 }}>Widget-Katalog</div>
-              <div onClick={() => setCatalogOpen(false)} style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--track)', display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--ink2)' }}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
-              </div>
+              <div onClick={() => setCatalogOpen(false)} style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--track)', display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--ink2)' }}><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg></div>
             </div>
             <div style={{ padding: '10px 16px 20px' }}>
               {(['A', 'B'] as const).map((grp) => (
                 <div key={grp} style={{ marginTop: 8 }}>
-                  <div style={{ ...kicker, fontSize: 10.5, padding: '10px 8px 8px' }}>Gruppe {grp}</div>
+                  <div style={{ ...kicker, fontSize: 10.5, padding: '10px 8px 8px' }}>Gruppe {grp === 'A' ? 'A · Körperdaten' : 'B · Scores'}</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {WIDGETS.filter((w) => w.group === grp).map((w) => {
-                      const active = layout.visible.includes(w.id)
-                      return (
-                        <div key={w.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 12px', borderRadius: 12, background: 'var(--track)' }}>
-                          <div style={{ width: 30, height: 30, borderRadius: 9, display: 'grid', placeItems: 'center', fontSize: 15, background: 'var(--card)' }}>{w.icon}</div>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--ink)' }}>{w.name}</div>
-                            <div style={{ ...kicker, fontSize: 9.5, marginTop: 1 }}>{w.type}</div>
-                          </div>
-                          <div onClick={() => (active ? remove(w.id) : add(w.id))} style={{ padding: '7px 14px', borderRadius: 10, fontSize: 12.5, fontWeight: 800, cursor: 'pointer', background: active ? 'var(--track)' : 'color-mix(in srgb, var(--accent) 14%, transparent)', color: active ? 'var(--ink3)' : 'var(--accent)', border: active ? '1px solid var(--hair)' : '1px solid color-mix(in srgb, var(--accent) 32%, transparent)' }}>{active ? '✓ Aktiv' : '+ Aktivieren'}</div>
-                        </div>
-                      )
-                    })}
+                    {WIDGETS.filter((w) => w.group === grp).map((w) => { const active = layout.visible.includes(w.id); return (
+                      <div key={w.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 12px', borderRadius: 12, background: 'var(--track)' }}>
+                        <div style={{ width: 30, height: 30, borderRadius: 9, display: 'grid', placeItems: 'center', fontSize: 15, background: 'var(--card)' }}>{w.icon}</div>
+                        <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 14, fontWeight: 800, color: 'var(--ink)' }}>{w.name}</div><div style={{ ...kicker, fontSize: 9.5, marginTop: 1 }}>{w.type}</div></div>
+                        <div onClick={() => (active ? remove(w.id) : add(w.id))} style={{ padding: '7px 14px', borderRadius: 10, fontSize: 12.5, fontWeight: 800, cursor: 'pointer', background: active ? 'var(--track)' : 'color-mix(in srgb, var(--accent) 14%, transparent)', color: active ? 'var(--ink3)' : 'var(--accent)', border: active ? '1px solid var(--hair)' : '1px solid color-mix(in srgb, var(--accent) 32%, transparent)' }}>{active ? '✓ Aktiv' : '+ Aktivieren'}</div>
+                      </div>
+                    ) })}
                   </div>
                 </div>
               ))}
@@ -814,6 +910,8 @@ function Trends() {
           </div>
         </div>
       )}
+
+      {zoomW && <ZoomModal w={zoomW} maps={maps} onClose={() => setZoom(null)} />}
     </div>
   )
 }

@@ -116,14 +116,24 @@ export interface GarminDaily {
   steps: number | null
   step_goal: number | null
   resting_hr: number | null
+  resting_hr_7d_avg: number | null
   min_hr: number | null
   max_hr: number | null
+  calories_total: number | null
+  calories_active: number | null
+  calories_bmr: number | null
+  intensity_moderate_min: number | null
+  intensity_vigorous_min: number | null
   stress_avg: number | null
   stress_max: number | null
   bb_high: number | null
   bb_low: number | null
   bb_wake: number | null
+  bb_charged: number | null
+  bb_drained: number | null
   spo2_avg: number | null
+  respiration_waking_avg: number | null
+  floors_ascended: number | null
   sleeping_sec: number | null
 }
 export interface SleepCurves {

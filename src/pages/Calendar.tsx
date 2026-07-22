@@ -1042,7 +1042,7 @@ export default function Calendar({ theme, onBack, onOpenTodos, onOpenSpotlight, 
                   {tracked.map((b) => {
                     const h = Math.max(16, ((b.e - b.s) / 60) * HOUR_H - 2)
                     return (
-                      <div key={`t${b.id}`} title={`${b.name} – zum Ansehen/Bearbeiten klicken`} onClick={(ev) => { ev.stopPropagation(); const en = entries.find((x) => x.id === b.id); if (en) setEntryPopup(en) }} style={{ position: 'absolute', left: 3, right: splitPlan ? 'calc(50% + 1px)' : 3, top: (b.s / 60) * HOUR_H, height: h, borderRadius: 9, background: b.color, boxShadow: '0 3px 10px var(--hair)', padding: '4px 7px', overflow: 'hidden', boxSizing: 'border-box', zIndex: 2, cursor: 'pointer' }}>
+                      <div key={`t${b.id}`} title={`${b.name} – zum Ansehen/Bearbeiten klicken`} onClick={(ev) => { ev.stopPropagation(); const en = entries.find((x) => x.id === b.id); if (en) { if (en.activity_id != null) setDeepDiveId(en.activity_id); else setEntryPopup(en) } }} style={{ position: 'absolute', left: 3, right: splitPlan ? 'calc(50% + 1px)' : 3, top: (b.s / 60) * HOUR_H, height: h, borderRadius: 9, background: b.color, boxShadow: '0 3px 10px var(--hair)', padding: '4px 7px', overflow: 'hidden', boxSizing: 'border-box', zIndex: 2, cursor: 'pointer' }}>
                         {h >= 22 && <div style={{ fontSize: 11, fontWeight: 800, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.name}</div>}
                         {h >= 38 && <div style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.85)', fontVariantNumeric: 'tabular-nums' }}>{minToHHMM(b.s)}–{minToHHMM(b.e)}</div>}
                       </div>
@@ -1180,7 +1180,7 @@ export default function Calendar({ theme, onBack, onOpenTodos, onOpenSpotlight, 
                 {rows.map((it, i) => {
                   const isPlan = it.kind === 'plan'
                   return (
-                    <div key={i} onClick={it.entry ? () => setEntryPopup(it.entry) : undefined} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 14, background: 'var(--glass)', border: isPlan ? `1.5px dashed ${it.color}` : '1px solid var(--border)', cursor: it.entry ? 'pointer' : 'default' }}>
+                    <div key={i} onClick={it.entry ? () => { const e = it.entry!; if (e.activity_id != null) setDeepDiveId(e.activity_id); else setEntryPopup(e) } : undefined} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 14, background: 'var(--glass)', border: isPlan ? `1.5px dashed ${it.color}` : '1px solid var(--border)', cursor: it.entry ? 'pointer' : 'default' }}>
                       <div style={{ width: 88, flex: 'none', fontSize: 13, fontWeight: 800, color: 'var(--ink2)', fontVariantNumeric: 'tabular-nums' }}>{minToHHMM(it.s)}–{minToHHMM(it.e)}</div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.name}</div>
