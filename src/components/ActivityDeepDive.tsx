@@ -169,6 +169,10 @@ export default function ActivityDeepDive({ activityId, employers, projects, onCl
     if (a.max_hr) kpis.push({ k: 'Max-HF', v: String(Math.round(a.max_hr)), u: 'bpm' })
     if (a.calories) kpis.push({ k: 'Kalorien', v: Math.round(a.calories).toLocaleString('de-DE'), u: 'kcal' })
     if (a.elevation_gain_m) kpis.push({ k: 'Höhenmeter', v: String(Math.round(a.elevation_gain_m)), u: 'm' })
+    if (a.training_load != null) kpis.push({ k: 'Load', v: String(Math.round(a.training_load)), u: '' })
+    if (a.aerobic_te != null) kpis.push({ k: 'Aerober Effekt', v: a.aerobic_te.toFixed(1).replace('.', ','), u: '' })
+    if (a.anaerobic_te != null) kpis.push({ k: 'Anaerober Effekt', v: a.anaerobic_te.toFixed(1).replace('.', ','), u: '' })
+    if (a.vo2max != null) kpis.push({ k: 'VO₂max', v: String(Math.round(a.vo2max)), u: '' })
     if (a.total_sets) kpis.push({ k: 'Sätze', v: String(a.total_sets), u: '' })
     if (a.total_reps) kpis.push({ k: 'Wdh', v: a.total_reps.toLocaleString('de-DE'), u: '' })
   }

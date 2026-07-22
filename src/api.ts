@@ -79,6 +79,9 @@ export interface GarminActivity {
   avg_hr: number | null
   max_hr: number | null
   elevation_gain_m: number | null
+  training_load: number | null
+  aerobic_te: number | null
+  anaerobic_te: number | null
   vo2max: number | null
   total_reps: number | null
   total_sets: number | null
@@ -155,6 +158,9 @@ export interface GarminSleep {
   hrv_status: string | null
   hrv_overnight_avg: number | null
   resting_hr: number | null
+  avg_hr: number | null
+  avg_spo2: number | null
+  avg_respiration: number | null
   avg_stress: number | null
   body_battery_change: number | null
   restless_moments: number | null

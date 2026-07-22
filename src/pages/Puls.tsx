@@ -22,6 +22,7 @@ const pad = (n: number) => String(n).padStart(2, '0')
 const startOfDay = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x }
 const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x }
 const dayKey = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+const dateFromKey = (k: string) => { const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d) }
 const parseTs = (ts: string) => new Date(ts.includes('T') ? ts : ts.replace(' ', 'T'))
 function fmtDur(min: number) { if (min < 60) return `${Math.round(min)} min`; return `${Math.floor(min / 60)}h ${pad(Math.round(min % 60))}` }
 function kmStr(m: number | null) { return m ? (m / 1000).toFixed(1).replace('.', ',') + ' km' : '–' }
@@ -72,10 +73,10 @@ export default function Puls({ theme, onBack, onOpenTodos, onOpenCalendar, onOpe
   const [employers, setEmployers] = useState<Employer[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [workouts, setWorkouts] = useState<Workout[]>([])
-  const [daily, setDaily] = useState<GarminDaily | null>(null)
-  const [sleep, setSleep] = useState<GarminSleep | null>(null)
+  const [dailyRange, setDailyRange] = useState<GarminDaily[]>([])
   const [sleepRange, setSleepRange] = useState<GarminSleep[]>([])
   const [scoresRange, setScoresRange] = useState<GarminScores[]>([])
+  const [heuteDay, setHeuteDay] = useState<Date | null>(null)
   const [planned, setPlanned] = useState<PlannedBlock[]>([])
   const [overrides, setOverrides] = useState<PlannedOverride[]>([])
   const [deepId, setDeepId] = useState<number | null>(null)
@@ -89,11 +90,9 @@ export default function Puls({ theme, onBack, onOpenTodos, onOpenCalendar, onOpe
     api.getGarminWorkouts().then(setWorkouts).catch(() => {})
     api.getPlanned().then(setPlanned).catch(() => {})
     api.getOverrides().then(setOverrides).catch(() => {})
-    // „Heute" = letzter verfügbarer Tag (heute ist evtl. noch nicht gesynct) -> jüngste Zeile (DESC).
-    const from3 = dayKey(addDays(new Date(), -3))
-    api.getGarminDaily(from3, todayKey).then((r) => setDaily(r[0] ?? null)).catch(() => {})
-    api.getGarminSleep(from3, todayKey).then((r) => setSleep(r[0] ?? null)).catch(() => {})
+    // Bereiche über 40 Tage; „Heute" wählt daraus den angezeigten Tag (Default: letzter Datentag).
     const from40 = dayKey(addDays(new Date(), -40))
+    api.getGarminDaily(from40, todayKey).then(setDailyRange).catch(() => {})
     api.getGarminSleep(from40, todayKey).then(setSleepRange).catch(() => {})
     api.getGarminScores(from40, todayKey).then(setScoresRange).catch(() => {})
   }
@@ -116,11 +115,22 @@ export default function Puls({ theme, onBack, onOpenTodos, onOpenCalendar, onOpe
     return { emoji, typeName, name, project, durMin, isHistory, color: isHistory ? '#94A3B8' : colorOf(w.employer_id) }
   }
 
-  // ---- aktuelle Woche (Mo–So), Heute markiert ----
+  // ---- aktuelle Woche (Mo–So) für den Workouts-Zeitraumfilter ----
   const monday = useMemo(() => { const t = startOfDay(new Date()); return addDays(t, -((t.getDay() + 6) % 7)) }, [])
-  const weekDates = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(monday, i)), [monday])
-  const weekWorkouts = useMemo(() => workouts.filter((w) => { const k = dayKey(parseTs(w.start_ts)); return k >= dayKey(weekDates[0]) && k <= dayKey(weekDates[6]) }), [workouts, weekDates])
-  const weekPlanned = useMemo(() => weekDates.flatMap((d) => resolvePlanned(planned, overrides, d, settings.bundesland).filter((b) => sportIds.has(b.employer_id)).map((b) => ({ ...b, date: d }))), [planned, overrides, weekDates, settings.bundesland, sportIds])
+
+  // ---- Heute-Ansicht: angezeigter Tag, navigierbar, gedeckelt auf letzten Datentag ----
+  const latestDay = useMemo(() => { const k = dailyRange[0]?.calendar_date ?? sleepRange[0]?.calendar_date; return k ? dateFromKey(k) : startOfDay(new Date()) }, [dailyRange, sleepRange])
+  const hDay = heuteDay ?? latestDay
+  const hKey = dayKey(hDay)
+  const hDaily = useMemo(() => dailyRange.find((d) => d.calendar_date === hKey) ?? null, [dailyRange, hKey])
+  const hSleep = useMemo(() => sleepRange.find((s) => s.calendar_date === hKey) ?? null, [sleepRange, hKey])
+  const hScores = useMemo(() => scoresRange.find((s) => s.calendar_date === hKey) ?? null, [scoresRange, hKey])
+  const hMonday = useMemo(() => addDays(startOfDay(hDay), -((hDay.getDay() + 6) % 7)), [hKey])
+  const hWeekDates = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(hMonday, i)), [hMonday])
+  const hWeekWorkouts = useMemo(() => workouts.filter((w) => { const k = dayKey(parseTs(w.start_ts)); return k >= dayKey(hWeekDates[0]) && k <= dayKey(hWeekDates[6]) }), [workouts, hWeekDates])
+  const hWeekPlanned = useMemo(() => hWeekDates.flatMap((d) => resolvePlanned(planned, overrides, d, settings.bundesland).filter((b) => sportIds.has(b.employer_id)).map((b) => ({ ...b, date: d }))), [planned, overrides, hWeekDates, settings.bundesland, sportIds])
+  const hLastWorkout = useMemo(() => (workouts as Workout[]).find((w) => dayKey(parseTs(w.start_ts)) <= hKey), [workouts, hKey])
+  const canForward = dayKey(hDay) < dayKey(latestDay)
 
   // ---- Deep-Dive öffnen (nur bei verknüpfter Aktivität) ----
   const openWorkout = (w: Workout) => { if (w.activity_id != null) setDeepId(w.activity_id); else onOpenDay(startOfDay(parseTs(w.start_ts))) }
@@ -160,7 +170,7 @@ export default function Puls({ theme, onBack, onOpenTodos, onOpenCalendar, onOpe
           <div style={{ fontSize: 44, fontWeight: 800, letterSpacing: '-1.4px', lineHeight: 1, marginTop: 6 }}>{viewTitle}</div>
         </div>
 
-        {seg === 'heute' && <Heute daily={daily} sleep={sleep} scores={scoresRange[0] ?? null} workouts={workouts} weekWorkouts={weekWorkouts} weekPlanned={weekPlanned} weekDates={weekDates} todayKey={todayKey} view={view} colorOf={colorOf} openWorkout={openWorkout} />}
+        {seg === 'heute' && <Heute daily={hDaily} sleep={hSleep} scores={hScores} lastWorkout={hLastWorkout} workouts={workouts} weekWorkouts={hWeekWorkouts} weekPlanned={hWeekPlanned} weekDates={hWeekDates} selKey={hKey} realTodayKey={todayKey} hDay={hDay} canForward={canForward} showLatest={dayKey(hDay) < dayKey(latestDay)} onPrev={() => setHeuteDay(addDays(hDay, -1))} onNext={() => { if (canForward) setHeuteDay(addDays(hDay, 1)) }} onLatest={() => setHeuteDay(null)} onOpenDaySel={(d: Date) => { if (dayKey(d) <= dayKey(latestDay)) setHeuteDay(startOfDay(d)) }} view={view} colorOf={colorOf} openWorkout={openWorkout} />}
         {seg === 'workouts' && <Workouts workouts={workouts} employers={employers} view={view} colorOf={colorOf} openWorkout={openWorkout} areaFilter={areaFilter} setAreaFilter={setAreaFilter} rangeFilter={rangeFilter} setRangeFilter={setRangeFilter} monday={monday} />}
         {seg === 'schlaf' && <Schlaf sleepRange={sleepRange} scoresRange={scoresRange} />}
         {seg === 'trends' && <Trends />}
@@ -206,19 +216,30 @@ function reco(daily: GarminDaily | null, workouts: Workout[]): { title: string; 
 }
 
 function fmtRecovery(v: number): string { if (v <= 0) return 'erholt'; if (v < 24) return `${v} Std`; return `${Math.floor(v / 24)} Tg ${v % 24} Std` }
-function Heute({ daily, sleep, scores, workouts, weekWorkouts, weekPlanned, weekDates, todayKey, view, colorOf, openWorkout }: any) {
+function Heute({ daily, sleep, scores, lastWorkout, workouts, weekWorkouts, weekPlanned, weekDates, selKey, realTodayKey, hDay, canForward, showLatest, onPrev, onNext, onLatest, onOpenDaySel, view, colorOf, openWorkout }: any) {
+  const dLabel = selKey === realTodayKey ? 'Heute' : `${WD[hDay.getDay()]}, ${hDay.getDate()}. ${MONTHS_SHORT[hDay.getMonth()]}`
+  const dayNav = (on: boolean): CSSProperties => ({ width: 36, height: 36, borderRadius: 11, ...GLASS, display: 'grid', placeItems: 'center', cursor: on ? 'pointer' : 'default', opacity: on ? 1 : 0.35, fontSize: 18, fontWeight: 700, color: 'var(--ink2)' })
   const kpis: ReactNode[] = []
   if (daily?.bb_high != null) kpis.push(<KpiCard key="bb" kickerText="Body Battery" emoji="🔋" tint={hexA('#22C55E', 0.15)} val={String(daily.bb_high)} unit="/ 100" color="#22C55E" barW={daily.bb_high} sub={daily.bb_low != null ? `Tief ${daily.bb_low} · Hoch ${daily.bb_high}` : 'Ladezustand'} />)
   if (daily?.stress_avg != null) kpis.push(<KpiCard key="st" kickerText="Stress" emoji="🌀" tint={hexA('#F59E0B', 0.15)} val={String(daily.stress_avg)} unit="/ 100" color="#F59E0B" barW={daily.stress_avg} sub={daily.stress_avg < 30 ? 'Niedrig' : daily.stress_avg < 60 ? 'Moderat' : 'Erhöht'} />)
   if (sleep?.score != null) kpis.push(<KpiCard key="sl" kickerText="Schlaf-Score" emoji="😴" tint={hexA('#7C5CFF', 0.15)} val={String(sleep.score)} unit="/ 100" color="#7C5CFF" barW={sleep.score} sub={sleep.total_sec ? `${fmtDur(sleep.total_sec / 60)} · ${sleep.score_qualifier ?? ''}` : (sleep.score_qualifier ?? '')} />)
   if (daily?.steps != null) { const goal = daily.step_goal || 10000; kpis.push(<KpiCard key="sp" kickerText="Schritte" emoji="👣" tint={hexA('#2563EB', 0.15)} val={daily.steps.toLocaleString('de-DE')} unit="" color="#2563EB" barW={(daily.steps / goal) * 100} sub={`Ziel ${goal.toLocaleString('de-DE')} · ${Math.round((daily.steps / goal) * 100)} %`} />) }
 
-  const last: Workout | undefined = workouts[0]
+  const last: Workout | undefined = lastWorkout
   const lv = last ? view(last) : null
   const r = reco(daily, workouts)
 
   return (
     <div>
+      {/* Tages-Navigation — wirkt auf alle Heute-Elemente */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
+        <div onClick={onPrev} title="Vorheriger Tag" style={dayNav(true)}>‹</div>
+        <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: '-0.3px', minWidth: 128, textAlign: 'center' }}>{dLabel}</div>
+        <div onClick={canForward ? onNext : undefined} title={canForward ? 'Nächster Tag' : 'Kein neuerer Datentag'} style={dayNav(canForward)}>›</div>
+        {showLatest && <div onClick={onLatest} title="Zum neuesten Tag" style={{ marginLeft: 4, padding: '8px 14px', borderRadius: 12, ...GLASS, cursor: 'pointer', fontSize: 12.5, fontWeight: 800, color: 'var(--ink2)' }}>Neuester ⏭</div>}
+      </div>
+
+      {kpis.length === 0 && <div style={{ ...CARD, borderRadius: 24, padding: '22px 24px', color: 'var(--ink3)', fontWeight: 700 }}>Keine Tagesdaten für {dLabel}.</div>}
       {kpis.length > 0 && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 18 }}>{kpis}</div>}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 18, marginTop: kpis.length > 0 ? 18 : 0 }}>
@@ -283,19 +304,19 @@ function Heute({ daily, sleep, scores, workouts, weekWorkouts, weekPlanned, week
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 10 }}>
           {weekDates.map((d: Date) => {
             const k = dayKey(d)
-            const isToday = k === todayKey
+            const isSel = k === selKey
             const dayWo = weekWorkouts.filter((w: Workout) => dayKey(parseTs(w.start_ts)) === k)
             const dayPl = weekPlanned.filter((b: any) => dayKey(b.date) === k)
             const rest = dayWo.length === 0 && dayPl.length === 0
             return (
-              <div key={k} style={{ borderRadius: 16, background: isToday ? 'color-mix(in srgb, var(--accent) 9%, var(--track))' : 'var(--track)', border: isToday ? '1.5px solid color-mix(in srgb, var(--accent) 45%, transparent)' : '1px solid var(--hair)', padding: '12px 10px', minHeight: 118, display: 'flex', flexDirection: 'column' }}>
+              <div key={k} onClick={() => onOpenDaySel(d)} title="Diesen Tag anzeigen" style={{ borderRadius: 16, cursor: 'pointer', background: isSel ? 'color-mix(in srgb, var(--accent) 9%, var(--track))' : 'var(--track)', border: isSel ? '1.5px solid color-mix(in srgb, var(--accent) 45%, transparent)' : '1px solid var(--hair)', padding: '12px 10px', minHeight: 118, display: 'flex', flexDirection: 'column' }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
-                  <div style={{ fontSize: 13, fontWeight: 800, color: isToday ? 'var(--accent)' : 'var(--ink2)' }}>{WD[d.getDay()]}</div>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: isSel ? 'var(--accent)' : 'var(--ink2)' }}>{WD[d.getDay()]}</div>
                   <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--ink3)', fontVariantNumeric: 'tabular-nums' }}>{d.getDate()}.</div>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 11 }}>
                   {dayWo.map((w: Workout) => { const v = view(w); return (
-                    <div key={`${w.origin}-${w.entry_id ?? w.activity_id}`} onClick={() => openWorkout(w)} title={`${v.name} – Details`} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 9px', borderRadius: 10, cursor: 'pointer', background: hexA(v.color, 0.2), border: `1px solid ${hexA(v.color, 0.35)}` }}>
+                    <div key={`${w.origin}-${w.entry_id ?? w.activity_id}`} onClick={(ev) => { ev.stopPropagation(); openWorkout(w) }} title={`${v.name} – Details`} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 9px', borderRadius: 10, cursor: 'pointer', background: hexA(v.color, 0.2), border: `1px solid ${hexA(v.color, 0.35)}` }}>
                       <span style={{ fontSize: 13, lineHeight: 1 }}>{v.emoji}</span>
                       <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{Math.round(v.durMin)}′</span>
                     </div>
@@ -466,6 +487,9 @@ function Schlaf({ sleepRange, scoresRange }: { sleepRange: GarminSleep[]; scores
   if (sel.body_battery_change != null) kpis.push(['Body Battery', `+${sel.body_battery_change}`, 'über Nacht'])
   if (sel.avg_stress != null) kpis.push(['Ø Stress', String(sel.avg_stress), ''])
   if (sel.resting_hr != null) kpis.push(['Ruhepuls', `${sel.resting_hr}`, 'bpm'])
+  if (sel.avg_hr != null) kpis.push(['Ø Herzfrequenz', `${Math.round(sel.avg_hr)}`, 'bpm'])
+  if (sel.avg_spo2 != null) kpis.push(['Ø SpO₂', `${sel.avg_spo2}`, '%'])
+  if (sel.avg_respiration != null) kpis.push(['Ø Atemfrequenz', `${sel.avg_respiration}`, '/min'])
   if (sel.restless_moments != null) kpis.push(['Unruhe', String(sel.restless_moments), 'Momente'])
   if (readiness?.training_readiness_score != null) kpis.push(['Readiness', String(readiness.training_readiness_score), readiness.tr_level ?? ''])
 
