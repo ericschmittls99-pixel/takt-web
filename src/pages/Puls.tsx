@@ -162,11 +162,7 @@ export default function Puls({ theme, onBack, onOpenTodos, onOpenCalendar, onOpe
         {seg === 'heute' && <Heute daily={daily} sleep={sleep} workouts={workouts} weekWorkouts={weekWorkouts} weekPlanned={weekPlanned} weekDates={weekDates} todayKey={todayKey} view={view} colorOf={colorOf} openWorkout={openWorkout} onOpenDay={onOpenDay} />}
         {seg === 'workouts' && <Workouts workouts={workouts} employers={employers} view={view} colorOf={colorOf} openWorkout={openWorkout} typeFilter={typeFilter} setTypeFilter={setTypeFilter} areaFilter={areaFilter} setAreaFilter={setAreaFilter} rangeFilter={rangeFilter} setRangeFilter={setRangeFilter} monday={monday} />}
         {seg === 'schlaf' && <Schlaf sleepRange={sleepRange} scoresRange={scoresRange} />}
-        {seg === 'trends' && (
-          <div style={{ ...CARD, borderRadius: 24, padding: '60px 26px', textAlign: 'center', color: 'var(--ink3)', fontWeight: 700 }}>
-            Trends — kommt in WP4d.
-          </div>
-        )}
+        {seg === 'trends' && <Trends />}
       </div>
 
       {deepId != null && <ActivityDeepDive activityId={deepId} employers={employers} projects={projects} onClose={() => setDeepId(null)} onChanged={loadAll} />}
@@ -600,6 +596,224 @@ function Schlaf({ sleepRange, scoresRange }: { sleepRange: GarminSleep[]; scores
           })}
         </div>
       </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Trends-Widget-Dashboard (WP4d-1: Geruest + Mechanik, Dummy-Inhalt)
+type WType = 'sparkline' | 'tagesverlauf' | 'score-gauge' | 'kennzahl-ziel'
+interface WidgetDef { id: string; name: string; icon: string; type: WType; defaultVisible: boolean; group: 'A' | 'B' }
+const WIDGETS: WidgetDef[] = [
+  { id: 'vo2max', name: 'VO2max', icon: '📈', type: 'sparkline', defaultVisible: true, group: 'A' },
+  { id: 'endurance', name: 'Endurance Score', icon: '🏅', type: 'sparkline', defaultVisible: true, group: 'A' },
+  { id: 'hill', name: 'Hill Score', icon: '⛰️', type: 'sparkline', defaultVisible: true, group: 'A' },
+  { id: 'readiness', name: 'Training Readiness', icon: '✅', type: 'score-gauge', defaultVisible: true, group: 'A' },
+  { id: 'fitness_age', name: 'Fitness Age', icon: '🎂', type: 'kennzahl-ziel', defaultVisible: true, group: 'A' },
+  { id: 'training_load', name: 'Trainingslast', icon: '🔥', type: 'tagesverlauf', defaultVisible: true, group: 'A' },
+  { id: 'race', name: 'Race Predictions', icon: '🏁', type: 'sparkline', defaultVisible: true, group: 'A' },
+  { id: 'hrv', name: 'HRV-Trend', icon: '💓', type: 'sparkline', defaultVisible: false, group: 'B' },
+  { id: 'resting_hr', name: 'Ruhepuls', icon: '❤️', type: 'sparkline', defaultVisible: false, group: 'B' },
+  { id: 'sleep_score', name: 'Schlaf-Score', icon: '😴', type: 'sparkline', defaultVisible: false, group: 'B' },
+  { id: 'stress', name: 'Stress-Verlauf', icon: '🌀', type: 'tagesverlauf', defaultVisible: false, group: 'B' },
+  { id: 'weight', name: 'Gewicht', icon: '⚖️', type: 'kennzahl-ziel', defaultVisible: false, group: 'B' },
+]
+const WMAP = new Map(WIDGETS.map((w) => [w.id, w]))
+type Layout = { visible: string[]; hidden: string[] }
+function defaultLayout(): Layout {
+  return { visible: WIDGETS.filter((w) => w.defaultVisible).map((w) => w.id), hidden: WIDGETS.filter((w) => !w.defaultVisible).map((w) => w.id) }
+}
+function reconcile(l: Layout): Layout {
+  const known = new Set(WIDGETS.map((w) => w.id))
+  const visible = (l.visible || []).filter((id) => known.has(id))
+  const hidden = (l.hidden || []).filter((id) => known.has(id) && !visible.includes(id))
+  const placed = new Set([...visible, ...hidden])
+  for (const w of WIDGETS) if (!placed.has(w.id)) (w.defaultVisible ? visible : hidden).push(w.id)
+  return { visible, hidden }
+}
+function dummySeries(id: string, n = 12): number[] {
+  let s = 7
+  for (const c of id) s = (s * 31 + c.charCodeAt(0)) & 0x7fffffff
+  const out: number[] = []
+  let v = 50
+  for (let i = 0; i < n; i++) { s = (s * 1103515245 + 12345) & 0x7fffffff; v += ((s % 1000) / 1000 - 0.45) * 12; v = Math.max(20, Math.min(90, v)); out.push(Math.round(v)) }
+  return out
+}
+
+function WidgetBody({ w }: { w: WidgetDef }) {
+  const accent = 'var(--accent)'
+  if (w.type === 'sparkline') {
+    const s = dummySeries(w.id)
+    return (
+      <div>
+        <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: '-1px', fontVariantNumeric: 'tabular-nums' }}>{s[s.length - 1]}</div>
+        <svg width="100%" height="46" viewBox="0 0 200 46" preserveAspectRatio="none" style={{ display: 'block', overflow: 'visible', marginTop: 8 }}>
+          <path d={sparkPath(s, 200, 46, 4)} fill="none" stroke={accent} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </div>
+    )
+  }
+  if (w.type === 'tagesverlauf') {
+    const s = dummySeries(w.id, 7)
+    const mx = Math.max(...s)
+    return (
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 70, marginTop: 6 }}>
+        {s.map((v, i) => <div key={i} style={{ flex: 1, height: `${(v / mx) * 100}%`, background: accent, borderRadius: '6px 6px 3px 3px', opacity: 0.85 }} />)}
+      </div>
+    )
+  }
+  if (w.type === 'score-gauge') {
+    const frac = dummySeries(w.id, 1)[0] / 100
+    const len = 141
+    return (
+      <div style={{ position: 'relative', display: 'grid', placeItems: 'center', marginTop: 4 }}>
+        <svg width="130" height="72" viewBox="0 0 100 56">
+          <path d="M6 50 A44 44 0 0 1 94 50" fill="none" stroke="var(--track)" strokeWidth="9" strokeLinecap="round" />
+          <path d="M6 50 A44 44 0 0 1 94 50" fill="none" stroke={accent} strokeWidth="9" strokeLinecap="round" strokeDasharray={`${(frac * len).toFixed(1)} ${len}`} />
+        </svg>
+        <div style={{ position: 'absolute', top: 30, fontSize: 26, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{Math.round(frac * 100)}</div>
+      </div>
+    )
+  }
+  // kennzahl-ziel
+  const val = dummySeries(w.id, 1)[0]
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
+        <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: '-1px', fontVariantNumeric: 'tabular-nums' }}>{val}</div>
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink3)' }}>/ Ziel {Math.round(val * 1.15)}</div>
+      </div>
+      <div style={{ height: 8, borderRadius: 99, background: 'var(--track)', marginTop: 12, overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${Math.min(100, (val / (val * 1.15)) * 100)}%`, background: accent, borderRadius: 99 }} />
+      </div>
+    </div>
+  )
+}
+
+function Trends() {
+  const [layout, setLayout] = useState<Layout | null>(null)
+  const [editing, setEditing] = useState(false)
+  const [catalogOpen, setCatalogOpen] = useState(false)
+  const [dragIdx, setDragIdx] = useState<number | null>(null)
+
+  useEffect(() => {
+    api.getSettings().then((s) => {
+      try { const p = JSON.parse(s.puls_trends_layout || 'null'); if (p && Array.isArray(p.visible)) { setLayout(reconcile(p)); return } } catch { /* fällt auf Default */ }
+      const def = defaultLayout(); setLayout(def); void api.updateSettings({ puls_trends_layout: JSON.stringify(def) })
+    }).catch(() => setLayout(defaultLayout()))
+  }, [])
+
+  function persist(next: Layout) {
+    setLayout(next)
+    void api.updateSettings({ puls_trends_layout: JSON.stringify(next) })
+  }
+  function remove(id: string) { if (!layout) return; persist({ visible: layout.visible.filter((x) => x !== id), hidden: [id, ...layout.hidden.filter((x) => x !== id)] }) }
+  function add(id: string) { if (!layout) return; persist({ visible: [...layout.visible.filter((x) => x !== id), id], hidden: layout.hidden.filter((x) => x !== id) }) }
+  function reorder(from: number, to: number) {
+    if (!layout || from === to) return
+    const v = [...layout.visible]
+    const [m] = v.splice(from, 1)
+    v.splice(to, 0, m)
+    setLayout({ visible: v, hidden: layout.hidden })
+  }
+
+  if (!layout) return <div style={{ ...CARD, borderRadius: 24, padding: '48px 26px', textAlign: 'center', color: 'var(--ink3)', fontWeight: 700 }}>Lädt…</div>
+
+  const editBtn: CSSProperties = { display: 'flex', alignItems: 'center', gap: 7, padding: '9px 15px', borderRadius: 12, fontSize: 13, fontWeight: 800, cursor: 'pointer' }
+
+  return (
+    <div>
+      {/* Toolbar */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--ink2)' }}>{layout.visible.length} Widgets</div>
+        <div style={{ flex: 1 }} />
+        {editing && (
+          <div onClick={() => setCatalogOpen(true)} style={{ ...editBtn, background: 'color-mix(in srgb, var(--accent) 13%, transparent)', border: '1px solid color-mix(in srgb, var(--accent) 32%, transparent)', color: 'var(--accent)' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+            Widget hinzufügen
+          </div>
+        )}
+        <div onClick={() => setEditing((e) => !e)} style={{ ...editBtn, ...GLASS, color: editing ? 'var(--accent)' : 'var(--ink2)', borderColor: editing ? 'color-mix(in srgb, var(--accent) 40%, transparent)' : 'var(--hair)' }}>
+          {editing ? 'Fertig' : 'Bearbeiten'}
+        </div>
+      </div>
+
+      {/* Raster */}
+      {layout.visible.length === 0 ? (
+        <div style={{ ...CARD, borderRadius: 24, padding: '56px 26px', textAlign: 'center' }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--ink)' }}>Keine Widgets</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink2)', marginTop: 6 }}>Füge Widgets hinzu, um deine Trends zu sehen.</div>
+          <div onClick={() => { setEditing(true); setCatalogOpen(true) }} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, marginTop: 18, padding: '10px 18px', borderRadius: 12, background: 'var(--accent)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>+ Widget hinzufügen</div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 18 }}>
+          {layout.visible.map((id, i) => {
+            const w = WMAP.get(id)
+            if (!w) return null
+            return (
+              <div
+                key={id}
+                draggable={editing}
+                onDragStart={() => setDragIdx(i)}
+                onDragOver={(e) => { if (!editing || dragIdx === null) return; e.preventDefault(); if (dragIdx !== i) { reorder(dragIdx, i); setDragIdx(i) } }}
+                onDragEnd={() => { setDragIdx(null); setLayout((cur) => { if (cur) void api.updateSettings({ puls_trends_layout: JSON.stringify(cur) }); return cur }) }}
+                style={{ ...CARD, borderRadius: 22, padding: '18px 20px', opacity: dragIdx === i ? 0.5 : 1, cursor: editing ? 'grab' : 'default', outline: editing ? '1.5px dashed var(--hair)' : 'none' }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                  <div style={{ width: 30, height: 30, borderRadius: 9, display: 'grid', placeItems: 'center', fontSize: 15, background: 'var(--track)' }}>{w.icon}</div>
+                  <div style={{ fontSize: 13.5, fontWeight: 800, color: 'var(--ink)', flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{w.name}</div>
+                  {editing ? (
+                    <>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style={{ color: 'var(--ink3)', flex: 'none' }}><circle cx="9" cy="6" r="1.6" /><circle cx="15" cy="6" r="1.6" /><circle cx="9" cy="12" r="1.6" /><circle cx="15" cy="12" r="1.6" /><circle cx="9" cy="18" r="1.6" /><circle cx="15" cy="18" r="1.6" /></svg>
+                      <div onClick={() => remove(id)} title="Entfernen" style={{ width: 24, height: 24, borderRadius: 7, display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#E5484D', background: 'var(--track)', flex: 'none' }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                      </div>
+                    </>
+                  ) : <div style={{ ...kicker, fontSize: 9.5, color: 'var(--ink3)' }}>{w.type}</div>}
+                </div>
+                <WidgetBody w={w} />
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--ink3)', marginTop: 12 }}>Platzhalter · echte Daten in WP4d-2</div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Katalog */}
+      {catalogOpen && (
+        <div onClick={() => setCatalogOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'var(--veil)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 40 }}>
+          <div onClick={(e) => e.stopPropagation()} className="no-scrollbar" style={{ width: 560, maxWidth: '100%', maxHeight: '84vh', overflowY: 'auto', borderRadius: 26, background: 'var(--glass-strong)', backdropFilter: 'blur(30px) saturate(180%)', WebkitBackdropFilter: 'blur(30px) saturate(180%)', border: '1px solid var(--border)', boxShadow: 'var(--shadow)', animation: 'popIn .2s ease' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '22px 24px 14px', borderBottom: '1px solid var(--hair)' }}>
+              <div style={{ fontSize: 19, fontWeight: 800 }}>Widget-Katalog</div>
+              <div onClick={() => setCatalogOpen(false)} style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--track)', display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--ink2)' }}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+              </div>
+            </div>
+            <div style={{ padding: '10px 16px 20px' }}>
+              {(['A', 'B'] as const).map((grp) => (
+                <div key={grp} style={{ marginTop: 8 }}>
+                  <div style={{ ...kicker, fontSize: 10.5, padding: '10px 8px 8px' }}>Gruppe {grp}</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {WIDGETS.filter((w) => w.group === grp).map((w) => {
+                      const active = layout.visible.includes(w.id)
+                      return (
+                        <div key={w.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 12px', borderRadius: 12, background: 'var(--track)' }}>
+                          <div style={{ width: 30, height: 30, borderRadius: 9, display: 'grid', placeItems: 'center', fontSize: 15, background: 'var(--card)' }}>{w.icon}</div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--ink)' }}>{w.name}</div>
+                            <div style={{ ...kicker, fontSize: 9.5, marginTop: 1 }}>{w.type}</div>
+                          </div>
+                          <div onClick={() => (active ? remove(w.id) : add(w.id))} style={{ padding: '7px 14px', borderRadius: 10, fontSize: 12.5, fontWeight: 800, cursor: 'pointer', background: active ? 'var(--track)' : 'color-mix(in srgb, var(--accent) 14%, transparent)', color: active ? 'var(--ink3)' : 'var(--accent)', border: active ? '1px solid var(--hair)' : '1px solid color-mix(in srgb, var(--accent) 32%, transparent)' }}>{active ? '✓ Aktiv' : '+ Aktivieren'}</div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

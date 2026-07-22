@@ -31,6 +31,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   bundesland: 'RP',
   absence_types: '[]',
   hotkeys: JSON.stringify(DEFAULT_HOTKEYS),
+  puls_trends_layout: '',
 }
 
 function startOfDay(d: Date): Date {

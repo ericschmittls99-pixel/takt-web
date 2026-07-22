@@ -33,6 +33,7 @@ export interface AppSettings {
   bundesland: string
   absence_types: string // JSON-Array (AbsenceTypeConfig[])
   hotkeys: string // JSON-Objekt (CommandId → Kombi-String, z. B. "mod+k")
+  puls_trends_layout: string // JSON { visible: string[], hidden: string[] }
 }
 
 export interface Project {
