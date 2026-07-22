@@ -183,6 +183,13 @@ export interface GarminSleep {
   curves?: SleepCurves | null
 }
 
+export interface IntradayPoint { t: number | null; v: number }
+export interface GarminIntraday {
+  calendar_date: string
+  body_battery_curve: IntradayPoint[] | null
+  stress_curve: IntradayPoint[] | null
+}
+
 export interface GarminScores {
   calendar_date: string
   training_readiness_score: number | null
@@ -485,6 +492,7 @@ export const api = {
   getGarminSleep: (from: string, to: string) => request<GarminSleep[]>(`/api/garmin/sleep?from=${from}&to=${to}`),
 
   getGarminScores: (from: string, to: string) => request<GarminScores[]>(`/api/garmin/scores?from=${from}&to=${to}`),
+  getGarminIntraday: (from: string, to: string) => request<GarminIntraday[]>(`/api/garmin/intraday?from=${from}&to=${to}`),
 
   getGarminActivity: (id: number) => request<GarminActivityDetail>(`/api/garmin/activities/${id}`),
 

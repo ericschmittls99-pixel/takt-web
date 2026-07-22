@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
-import { api, type AppSettings, type Employer, type GarminDaily, type GarminScores, type GarminSleep, type PlannedBlock, type PlannedOverride, type Project, type Workout } from '../api'
+import { api, type AppSettings, type Employer, type GarminDaily, type GarminIntraday, type GarminScores, type GarminSleep, type IntradayPoint, type PlannedBlock, type PlannedOverride, type Project, type Workout } from '../api'
 import { employerColor } from '../colors'
 import { holidayName } from '../holidays'
 import InboxPopover from '../components/InboxPopover'
@@ -76,6 +76,7 @@ export default function Puls({ theme, onBack, onOpenTodos, onOpenCalendar, onOpe
   const [dailyRange, setDailyRange] = useState<GarminDaily[]>([])
   const [sleepRange, setSleepRange] = useState<GarminSleep[]>([])
   const [scoresRange, setScoresRange] = useState<GarminScores[]>([])
+  const [intradayRange, setIntradayRange] = useState<GarminIntraday[]>([])
   const [heuteDay, setHeuteDay] = useState<Date | null>(null)
   const [planned, setPlanned] = useState<PlannedBlock[]>([])
   const [overrides, setOverrides] = useState<PlannedOverride[]>([])
@@ -95,6 +96,7 @@ export default function Puls({ theme, onBack, onOpenTodos, onOpenCalendar, onOpe
     api.getGarminDaily(from40, todayKey).then(setDailyRange).catch(() => {})
     api.getGarminSleep(from40, todayKey).then(setSleepRange).catch(() => {})
     api.getGarminScores(from40, todayKey).then(setScoresRange).catch(() => {})
+    api.getGarminIntraday(from40, todayKey).then(setIntradayRange).catch(() => {})
   }
   useEffect(loadAll, [todayKey])
 
@@ -125,6 +127,7 @@ export default function Puls({ theme, onBack, onOpenTodos, onOpenCalendar, onOpe
   const hDaily = useMemo(() => dailyRange.find((d) => d.calendar_date === hKey) ?? null, [dailyRange, hKey])
   const hSleep = useMemo(() => sleepRange.find((s) => s.calendar_date === hKey) ?? null, [sleepRange, hKey])
   const hScores = useMemo(() => scoresRange.find((s) => s.calendar_date === hKey) ?? null, [scoresRange, hKey])
+  const hIntraday = useMemo(() => intradayRange.find((r) => r.calendar_date === hKey) ?? null, [intradayRange, hKey])
   const hMonday = useMemo(() => addDays(startOfDay(hDay), -((hDay.getDay() + 6) % 7)), [hKey])
   const hWeekDates = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(hMonday, i)), [hMonday])
   const hWeekWorkouts = useMemo(() => workouts.filter((w) => { const k = dayKey(parseTs(w.start_ts)); return k >= dayKey(hWeekDates[0]) && k <= dayKey(hWeekDates[6]) }), [workouts, hWeekDates])
@@ -170,7 +173,7 @@ export default function Puls({ theme, onBack, onOpenTodos, onOpenCalendar, onOpe
           <div style={{ fontSize: 44, fontWeight: 800, letterSpacing: '-1.4px', lineHeight: 1, marginTop: 6 }}>{viewTitle}</div>
         </div>
 
-        {seg === 'heute' && <Heute daily={hDaily} sleep={hSleep} scores={hScores} lastWorkout={hLastWorkout} workouts={workouts} weekWorkouts={hWeekWorkouts} weekPlanned={hWeekPlanned} weekDates={hWeekDates} selKey={hKey} realTodayKey={todayKey} hDay={hDay} canForward={canForward} showLatest={dayKey(hDay) < dayKey(latestDay)} onPrev={() => setHeuteDay(addDays(hDay, -1))} onNext={() => { if (canForward) setHeuteDay(addDays(hDay, 1)) }} onLatest={() => setHeuteDay(null)} onOpenDaySel={(d: Date) => { if (dayKey(d) <= dayKey(latestDay)) setHeuteDay(startOfDay(d)) }} view={view} colorOf={colorOf} openWorkout={openWorkout} />}
+        {seg === 'heute' && <Heute daily={hDaily} sleep={hSleep} scores={hScores} intraday={hIntraday} lastWorkout={hLastWorkout} workouts={workouts} weekWorkouts={hWeekWorkouts} weekPlanned={hWeekPlanned} weekDates={hWeekDates} selKey={hKey} realTodayKey={todayKey} hDay={hDay} canForward={canForward} showLatest={dayKey(hDay) < dayKey(latestDay)} onPrev={() => setHeuteDay(addDays(hDay, -1))} onNext={() => { if (canForward) setHeuteDay(addDays(hDay, 1)) }} onLatest={() => setHeuteDay(null)} onOpenDaySel={(d: Date) => { if (dayKey(d) <= dayKey(latestDay)) setHeuteDay(startOfDay(d)) }} view={view} colorOf={colorOf} openWorkout={openWorkout} />}
         {seg === 'workouts' && <Workouts workouts={workouts} employers={employers} view={view} colorOf={colorOf} openWorkout={openWorkout} areaFilter={areaFilter} setAreaFilter={setAreaFilter} rangeFilter={rangeFilter} setRangeFilter={setRangeFilter} monday={monday} />}
         {seg === 'schlaf' && <Schlaf sleepRange={sleepRange} scoresRange={scoresRange} />}
         {seg === 'trends' && <Trends />}
@@ -216,7 +219,45 @@ function reco(daily: GarminDaily | null, workouts: Workout[]): { title: string; 
 }
 
 function fmtRecovery(v: number): string { if (v <= 0) return 'erholt'; if (v < 24) return `${v} Std`; return `${Math.floor(v / 24)} Tg ${v % 24} Std` }
-function Heute({ daily, sleep, scores, lastWorkout, workouts, weekWorkouts, weekPlanned, weekDates, selKey, realTodayKey, hDay, canForward, showLatest, onPrev, onNext, onLatest, onOpenDaySel, view, colorOf, openWorkout }: any) {
+
+// Intraday-Tagesverlauf (3-Min-Raster), feste 0–domainMax-Skala für vergleichbare Form.
+function IntradayChart({ pts, color, domainMax = 100, height = 84 }: { pts: IntradayPoint[]; color: string; domainMax?: number; height?: number }) {
+  const W = 620
+  const vals = pts.map((p) => p.v)
+  const n = vals.length
+  const xx = (i: number) => (n > 1 ? (i / (n - 1)) * W : 0)
+  const yy = (v: number) => height - 3 - (Math.max(0, Math.min(domainMax, v)) / domainMax) * (height - 6)
+  const line = vals.map((v, i) => `${i ? 'L' : 'M'}${xx(i).toFixed(1)} ${yy(v).toFixed(1)}`).join(' ')
+  const area = `M0 ${height} ${vals.map((v, i) => `L${xx(i).toFixed(1)} ${yy(v).toFixed(1)}`).join(' ')} L${W} ${height} Z`
+  return (
+    <svg width="100%" height={height} viewBox={`0 0 ${W} ${height}`} preserveAspectRatio="none" style={{ display: 'block', overflow: 'visible' }}>
+      <path d={area} fill={hexA(color, 0.13)} stroke="none" />
+      <path d={line} fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function IntradayCard({ title, emoji, pts, color, tint, sub }: { title: string; emoji: string; pts: IntradayPoint[]; color: string; tint: string; sub?: string }) {
+  const vals = pts.map((p) => p.v)
+  const start = vals[0], end = vals[vals.length - 1], lo = Math.min(...vals), hi = Math.max(...vals)
+  return (
+    <div style={{ ...CARD, borderRadius: 24, padding: '20px 22px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={kicker}>{title}</div>
+        <div style={{ width: 34, height: 34, borderRadius: 11, display: 'grid', placeItems: 'center', fontSize: 17, background: tint }}>{emoji}</div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: '-1px', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{Math.round(end)}</div>
+        <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--ink3)' }}>Start {Math.round(start)} · Tief {Math.round(lo)} · Hoch {Math.round(hi)}</div>
+      </div>
+      <div style={{ marginTop: 14 }}><IntradayChart pts={pts} color={color} /></div>
+      {sub && <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--ink3)', marginTop: 8 }}>{sub}</div>}
+    </div>
+  )
+}
+function Heute({ daily, sleep, scores, intraday, lastWorkout, workouts, weekWorkouts, weekPlanned, weekDates, selKey, realTodayKey, hDay, canForward, showLatest, onPrev, onNext, onLatest, onOpenDaySel, view, colorOf, openWorkout }: any) {
+  const bbCurve: IntradayPoint[] = intraday?.body_battery_curve ?? []
+  const stCurve: IntradayPoint[] = intraday?.stress_curve ?? []
   const dLabel = selKey === realTodayKey ? 'Heute' : `${WD[hDay.getDay()]}, ${hDay.getDate()}. ${MONTHS_SHORT[hDay.getMonth()]}`
   const dayNav = (on: boolean): CSSProperties => ({ width: 36, height: 36, borderRadius: 11, ...GLASS, display: 'grid', placeItems: 'center', cursor: on ? 'pointer' : 'default', opacity: on ? 1 : 0.35, fontSize: 18, fontWeight: 700, color: 'var(--ink2)' })
   const kpis: ReactNode[] = []
@@ -288,6 +329,14 @@ function Heute({ daily, sleep, scores, lastWorkout, workouts, weekWorkouts, week
           </div>
         </div>
       </div>
+
+      {/* Body Battery + Stress — Tagesverlauf (9.3.2, an den angezeigten Tag gebunden) */}
+      {(bbCurve.length > 1 || stCurve.length > 1) && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 18, marginTop: 18 }}>
+          {bbCurve.length > 1 && <IntradayCard title="Body Battery – Verlauf" emoji="🔋" pts={bbCurve} color="#22C55E" tint={hexA('#22C55E', 0.15)} sub={`${bbCurve.length} Messpunkte über den Tag`} />}
+          {stCurve.length > 1 && <IntradayCard title="Stress – Verlauf" emoji="🌀" pts={stCurve} color="#F59E0B" tint={hexA('#F59E0B', 0.15)} sub="Skala 0 (ruhig) – 100 (hoch)" />}
+        </div>
+      )}
 
       {/* Wochenleiste */}
       <div style={{ ...CARD, borderRadius: 24, padding: '22px 24px', marginTop: 18 }}>
@@ -641,6 +690,7 @@ interface WidgetDef {
   target?: (r: Record<string, unknown>) => number | null
   fmt?: (v: number) => string
   special?: 'vo2max' | 'load' | 'race' | 'status'
+  intradayKey?: 'body_battery_curve' | 'stress_curve'  // Zoom-Modal zeigt zusätzlich den 3-Min-Tagesverlauf
 }
 const numN = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
 const fmtMMSS = (sec: number) => `${Math.floor(sec / 60)}:${pad(Math.round(sec % 60))}`
@@ -649,8 +699,8 @@ const WIDGETS: WidgetDef[] = [
   // Gruppe A — garmin_daily / garmin_sleep
   { id: 'resting_hr', name: 'Ruhepuls', icon: '❤️', type: 'sparkline', group: 'A', defaultVisible: true, src: 'daily', get: (r) => numN(r.resting_hr), unit: 'bpm', goodDir: 'down' },
   { id: 'hrv', name: 'HRV', icon: '💓', type: 'sparkline', group: 'A', defaultVisible: true, src: 'sleep', get: (r) => numN(r.hrv_overnight_avg), unit: 'ms', goodDir: 'up' },
-  { id: 'stress', name: 'Stress', icon: '🌀', type: 'tagesverlauf', group: 'A', defaultVisible: false, src: 'daily', get: (r) => numN(r.stress_avg), goodDir: 'down' },
-  { id: 'body_battery', name: 'Body Battery', icon: '🔋', type: 'tagesverlauf', group: 'A', defaultVisible: true, src: 'daily', get: (r) => numN(r.bb_high), goodDir: 'up' },
+  { id: 'stress', name: 'Stress', icon: '🌀', type: 'tagesverlauf', group: 'A', defaultVisible: false, src: 'daily', get: (r) => numN(r.stress_avg), goodDir: 'down', intradayKey: 'stress_curve' },
+  { id: 'body_battery', name: 'Body Battery', icon: '🔋', type: 'tagesverlauf', group: 'A', defaultVisible: true, src: 'daily', get: (r) => numN(r.bb_high), goodDir: 'up', intradayKey: 'body_battery_curve' },
   { id: 'steps', name: 'Schritte', icon: '👣', type: 'kennzahl-ziel', group: 'A', defaultVisible: false, src: 'daily', get: (r) => numN(r.steps), target: (r) => numN(r.step_goal), goodDir: 'up' },
   { id: 'sleep_score', name: 'Schlaf-Score', icon: '😴', type: 'sparkline', group: 'A', defaultVisible: true, src: 'sleep', get: (r) => numN(r.score), goodDir: 'up' },
   { id: 'spo2', name: 'SpO₂', icon: '🫁', type: 'sparkline', group: 'A', defaultVisible: false, src: 'daily', get: (r) => numN(r.spo2_avg), unit: '%', goodDir: 'up' },
@@ -790,8 +840,9 @@ function WidgetBody({ w, maps }: { w: WidgetDef; maps: Maps }) {
   )
 }
 
-function ZoomModal({ w, maps, onClose }: { w: WidgetDef; maps: Maps; onClose: () => void }) {
+function ZoomModal({ w, maps, intraday, onClose }: { w: WidgetDef; maps: Maps; intraday?: Map<string, GarminIntraday>; onClose: () => void }) {
   const [period, setPeriod] = useState<'week' | 'month' | 'year' | 'all'>('month')
+  const [iDay, setIDay] = useState<string | null>(null)
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k) }, [onClose])
   const days = period === 'week' ? 7 : period === 'month' ? 30 : 365
   const vals = buildSeries(w, maps, days)
@@ -799,6 +850,20 @@ function ZoomModal({ w, maps, onClose }: { w: WidgetDef; maps: Maps; onClose: ()
   const dots = w.special === 'vo2max' ? changeDots(vals, 900, 260, 10) : []
   const bars = w.type === 'tagesverlauf'
   const mx = Math.max(1, ...vals.filter((v): v is number => v != null))
+
+  // Intraday-Tagesverlauf (nur BB/Stress, nur Tage mit Kurvendaten).
+  const iKey = w.intradayKey
+  const intraDays = useMemo(() => {
+    if (!iKey || !intraday) return [] as string[]
+    return [...intraday.values()].filter((r) => Array.isArray(r[iKey]) && (r[iKey] as IntradayPoint[]).length > 1).map((r) => r.calendar_date).sort().reverse()
+  }, [iKey, intraday])
+  const selDay = iDay && intraDays.includes(iDay) ? iDay : intraDays[0] ?? null
+  const iPts: IntradayPoint[] = selDay && intraday && iKey ? ((intraday.get(selDay)?.[iKey] as IntradayPoint[]) ?? []) : []
+  const iColor = iKey === 'stress_curve' ? '#F59E0B' : '#22C55E'
+  const iVals = iPts.map((p) => p.v)
+  const iNav = (on: boolean): CSSProperties => ({ width: 32, height: 32, borderRadius: 10, background: 'var(--track)', display: 'grid', placeItems: 'center', cursor: on ? 'pointer' : 'default', opacity: on ? 1 : 0.35, fontSize: 17, fontWeight: 700, color: 'var(--ink2)' })
+  const iLabel = selDay ? (() => { const d = dateFromKey(selDay); return `${WD[d.getDay()]}, ${d.getDate()}. ${MONTHS_SHORT[d.getMonth()]}` })() : ''
+  const iIdx = selDay ? intraDays.indexOf(selDay) : -1
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 320, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 40, background: 'var(--veil)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)' }}>
       <div onClick={onClose} style={{ position: 'absolute', inset: 0 }} />
@@ -834,6 +899,31 @@ function ZoomModal({ w, maps, onClose }: { w: WidgetDef; maps: Maps; onClose: ()
             <div style={{ alignSelf: 'flex-end', fontSize: 12, fontWeight: 700, color: 'var(--ink3)' }}>{st.n} Tage mit Daten</div>
           </div>
         )}
+
+        {/* Intraday-Tagesverlauf (3-Min) — zusätzlich zum Mehrtage-Trend, nur Tage mit Kurve */}
+        {iKey && intraDays.length > 0 && (
+          <div style={{ marginTop: 22, borderTop: '1px solid var(--hair)', paddingTop: 18 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+              <div style={kicker}>Tagesverlauf · 3-Min</div>
+              <div style={{ flex: 1 }} />
+              <div onClick={iIdx < intraDays.length - 1 ? () => setIDay(intraDays[iIdx + 1]) : undefined} title="Älterer Tag" style={iNav(iIdx < intraDays.length - 1)}>‹</div>
+              <div style={{ fontSize: 13, fontWeight: 800, minWidth: 118, textAlign: 'center' }}>{iLabel}</div>
+              <div onClick={iIdx > 0 ? () => setIDay(intraDays[iIdx - 1]) : undefined} title="Neuerer Tag" style={iNav(iIdx > 0)}>›</div>
+            </div>
+            <div style={{ background: 'var(--card)', border: '1px solid var(--hair)', borderRadius: 18, padding: '14px 12px' }}>
+              <IntradayChart pts={iPts} color={iColor} height={180} />
+            </div>
+            {iVals.length > 0 && (
+              <div style={{ display: 'flex', gap: 30, marginTop: 14 }}>
+                {([['Start', iVals[0]], ['Tief', Math.min(...iVals)], ['Hoch', Math.max(...iVals)], ['Zuletzt', iVals[iVals.length - 1]]] as const).map(([k, v]) => (
+                  <div key={k}><div style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-0.5px', fontVariantNumeric: 'tabular-nums' }}>{Math.round(v)}</div><div style={{ ...kicker, fontSize: 10.5, marginTop: 3 }}>{k}</div></div>
+                ))}
+                <div style={{ flex: 1 }} />
+                <div style={{ alignSelf: 'flex-end', fontSize: 12, fontWeight: 700, color: 'var(--ink3)' }}>{iVals.length} Punkte</div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -848,6 +938,7 @@ function Trends() {
   const [daily, setDaily] = useState<Record<string, unknown>[]>([])
   const [sleepR, setSleepR] = useState<Record<string, unknown>[]>([])
   const [scores, setScores] = useState<Record<string, unknown>[]>([])
+  const [intraday, setIntraday] = useState<GarminIntraday[]>([])
 
   useEffect(() => {
     api.getSettings().then((s) => {
@@ -858,7 +949,9 @@ function Trends() {
     api.getGarminDaily(from, to).then((r) => setDaily(r as unknown as Record<string, unknown>[])).catch(() => {})
     api.getGarminSleep(from, to).then((r) => setSleepR(r as unknown as Record<string, unknown>[])).catch(() => {})
     api.getGarminScores(from, to).then((r) => setScores(r as unknown as Record<string, unknown>[])).catch(() => {})
+    api.getGarminIntraday(from, to).then(setIntraday).catch(() => {})
   }, [])
+  const intradayMap = useMemo(() => new Map(intraday.map((r) => [r.calendar_date, r])), [intraday])
 
   const maps = useMemo<Maps>(() => ({
     daily: new Map(daily.map((r) => [String(r.calendar_date), r])),
@@ -935,7 +1028,7 @@ function Trends() {
         </div>
       )}
 
-      {zoomW && <ZoomModal w={zoomW} maps={maps} onClose={() => setZoom(null)} />}
+      {zoomW && <ZoomModal w={zoomW} maps={maps} intraday={intradayMap} onClose={() => setZoom(null)} />}
     </div>
   )
 }

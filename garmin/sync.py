@@ -305,6 +305,56 @@ def sample_series(detail: dict) -> tuple[dict, list | None]:
     return series, gps
 
 
+def _descr_index(descriptors, want_substr: str):
+    for d in (descriptors or []):
+        key = idx = None
+        for k, v in d.items():
+            lk = k.lower()
+            if lk.endswith("key"):
+                key = str(v).lower()
+            elif lk.endswith("index"):
+                idx = v
+        if key and want_substr in key:
+            return idx
+    return None
+
+
+def build_intraday_curve(values, descriptors, level_substr: str, cap: int = 180) -> list | None:
+    """[{t,v}] aus einem Garmin-Intraday-Array (3-Min-Raster), downgesampelt auf ~cap Punkte.
+    Negative Werte (Stress -1 = keine Messung) werden entfernt."""
+    if not values:
+        return None
+    ti = _descr_index(descriptors, "timestamp")
+    vi = _descr_index(descriptors, level_substr)
+    if ti is None:
+        ti = 0
+    if vi is None:
+        return None
+    pts = []
+    for row in values:
+        if not isinstance(row, list) or vi >= len(row):
+            continue
+        v = row[vi]
+        if v is None or (isinstance(v, (int, float)) and v < 0):
+            continue
+        t = row[ti] if ti < len(row) else None
+        pts.append({"t": t, "v": v})
+    if len(pts) <= 1:
+        return None
+    if len(pts) > cap:
+        step = math.ceil(len(pts) / cap)
+        pts = pts[::step]
+    return pts
+
+
+def map_dailystress(data: dict) -> tuple[list | None, list | None]:
+    bb_desc = data.get("bodyBatteryValueDescriptorsDTOList") or data.get("bodyBatteryValueDescriptorDTOList")
+    st_desc = data.get("stressValueDescriptorsDTOList") or data.get("stressValueDescriptorDTOList")
+    bb = build_intraday_curve(data.get("bodyBatteryValuesArray"), bb_desc, "bodybatterylevel")
+    st = build_intraday_curve(data.get("stressValuesArray"), st_desc, "stresslevel")
+    return bb, st
+
+
 def build_activity_detail_payload(a: dict, detail: dict | None) -> dict:
     hz = {f"z{i}": a.get(f"hrTimeInZone_{i}") for i in range(1, 6)}
     series, gps = sample_series(detail) if detail else ({}, None)
@@ -475,6 +525,42 @@ def sync_sleep(dn: str, days: int, stmts: list[str], summary: dict) -> None:
         if cal in have: upd += 1
         else: new += 1
     summary["garmin_sleep"] = (new, upd)
+
+
+def sync_intraday(days: int, stmts: list[str], summary: dict) -> None:
+    """Body-Battery- + Stress-Tagesverlauf aus dailyStress/{date} (EIN Abruf/Tag, beide Arrays).
+    Garmin hält Intraday nicht unbegrenzt vor -> leere/ältere Tage werden gezählt, nicht als Fehler."""
+    have = existing_keys("garmin_intraday", "calendar_date")
+    new = upd = empty = 0
+    for d in dates_desc(days):
+        try:
+            data = api_retry(f"/wellness-service/wellness/dailyStress/{d}")
+        except Exception:  # noqa: BLE001
+            empty += 1
+            continue
+        bb, st = map_dailystress(data) if isinstance(data, dict) else (None, None)
+        if not bb and not st:
+            empty += 1
+            continue
+        row = {
+            "body_battery_curve": qj(bb) if bb else "NULL",
+            "stress_curve": qj(st) if st else "NULL",
+        }
+        # qj liefert bereits ein SQL-Literal -> direkt einsetzen statt über q().
+        cols = ["calendar_date", "body_battery_curve", "stress_curve"]
+        sets = "body_battery_curve=excluded.body_battery_curve, stress_curve=excluded.stress_curve"
+        stmts.append(
+            f"INSERT INTO garmin_intraday ({', '.join(cols)}) "
+            f"VALUES ({q(d)}, {row['body_battery_curve']}, {row['stress_curve']}) "
+            f"ON CONFLICT(calendar_date) DO UPDATE SET {sets};")
+        if d in have:
+            upd += 1
+        else:
+            new += 1
+    summary["garmin_intraday"] = (new, upd)
+    summary["_intraday_empty"] = empty
+    if empty:
+        warn(f"Intraday: {empty} Tage ohne Kurvendaten (Garmin hält Intraday nicht unbegrenzt vor).")
 
 
 def sync_health(dn: str, days: int, activities: list[dict], stmts: list[str], summary: dict) -> None:
@@ -681,6 +767,7 @@ def main() -> int:
     if want("activities"): cat("activities", lambda: sync_activities(args.days, stmts, summary))
     if want("daily"): cat("daily", lambda: sync_daily(dn, args.days, stmts, summary))
     if want("sleep"): cat("sleep", lambda: sync_sleep(dn, args.days, stmts, summary))
+    if want("intraday"): cat("intraday", lambda: sync_intraday(args.days, stmts, summary))
     if want("health"): cat("health", lambda: sync_health(dn, args.days, acts_recent, stmts, summary))
     if want("scores"): cat("scores", lambda: sync_scores(dn, args.days, stmts, summary))
 
@@ -692,9 +779,9 @@ def main() -> int:
             return 1
 
     log("\n== Zusammenfassung (neu / aktualisiert) ==")
-    for t in ["activities", "garmin_daily", "garmin_sleep", "garmin_health", "garmin_scores"]:
+    for t in ["activities", "garmin_daily", "garmin_sleep", "garmin_intraday", "garmin_health", "garmin_scores"]:
         n, u = summary.get(t, (0, 0))
-        log(f"  {t:14} {n} neu / {u} aktualisiert")
+        log(f"  {t:16} {n} neu / {u} aktualisiert")
 
     # Coverage: wie viele Tage haben tatsächlich Daten je Score-Feld (gesamte Tabelle).
     try:
@@ -726,6 +813,24 @@ def main() -> int:
                     log(f"  {k:14} {r.get(k)}")
         except Exception as e:  # noqa: BLE001
             warn(f"Aktivitäts-Coverage nicht möglich: {e}")
+
+    # Coverage Intraday (Body Battery + Stress Tagesverlauf).
+    if want("intraday"):
+        try:
+            cov = d1_query(
+                "SELECT COUNT(*) AS total, "
+                "SUM(CASE WHEN body_battery_curve IS NOT NULL THEN 1 ELSE 0 END) AS mit_bb, "
+                "SUM(CASE WHEN stress_curve IS NOT NULL THEN 1 ELSE 0 END) AS mit_stress "
+                "FROM garmin_intraday")
+            if cov:
+                r = cov[0]
+                leer = summary.get("_intraday_empty", 0)
+                log(f"\n== Intraday-Coverage (Tage gesamt {r.get('total')}) ==")
+                log(f"  mit BB-Kurve      {r.get('mit_bb')}")
+                log(f"  mit Stress-Kurve  {r.get('mit_stress')}")
+                log(f"  ohne Kurvendaten  {leer}  (ältere/ohne Intraday bei Garmin)")
+        except Exception as e:  # noqa: BLE001
+            warn(f"Intraday-Coverage nicht möglich: {e}")
 
     if _failures:
         err(f"Abgeschlossen mit Fehlern in: {', '.join(_failures)}")
