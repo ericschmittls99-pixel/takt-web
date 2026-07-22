@@ -175,11 +175,22 @@ def g(d: dict, *keys):
 ACT_MEASURE = ["start_ts", "type", "name", "duration_sec", "distance_m", "calories",
                "avg_hr", "max_hr", "elevation_gain_m", "training_load", "aerobic_te",
                "anaerobic_te", "moderate_min", "vigorous_min", "vo2max",
-               "total_reps", "total_sets"]
+               "total_reps", "total_sets",
+               "avg_power", "max_power", "norm_power", "max_20min_power",
+               "intensity_factor", "training_stress_score", "avg_lr_balance",
+               "pedal_strokes", "work_kj", "power_zones"]
 
 
 def map_activity(a: dict) -> tuple[str, dict]:
     gid = str(a.get("activityId"))
+    # Work (kJ) ist KEIN Garmin-Feld -> abgeleitet: Ø-Power × Bewegungsdauer.
+    avgp = g(a, "avgPower")
+    mdur = g(a, "movingDuration") or g(a, "duration")
+    work = round(avgp * mdur / 1000, 1) if (avgp is not None and mdur is not None) else None
+    strokes = g(a, "strokes")
+    strokes = int(round(strokes)) if strokes is not None else None
+    pz = {f"z{i}": a.get(f"powerTimeInZone_{i}") for i in range(1, 8)}
+    pz = {k: v for k, v in pz.items() if v is not None}
     row = {
         "start_ts": g(a, "startTimeLocal"),
         "type": (a.get("activityType") or {}).get("typeKey"),
@@ -198,6 +209,17 @@ def map_activity(a: dict) -> tuple[str, dict]:
         "vo2max": g(a, "vO2MaxValue"),
         "total_reps": g(a, "totalReps"),
         "total_sets": g(a, "totalSets"),
+        # Power-Summary (nur Rad-mit-Powermeter füllt sie):
+        "avg_power": avgp,
+        "max_power": g(a, "maxPower"),
+        "norm_power": g(a, "normPower"),
+        "max_20min_power": g(a, "max20MinPower"),
+        "intensity_factor": g(a, "intensityFactor"),
+        "training_stress_score": g(a, "trainingStressScore"),
+        "avg_lr_balance": g(a, "avgLeftBalance"),
+        "pedal_strokes": strokes,
+        "work_kj": work,
+        "power_zones": json.dumps(pz, ensure_ascii=False, separators=(",", ":")) if pz else None,
     }
     return gid, row
 
@@ -237,14 +259,66 @@ def convert_exercise_sets(sets):
     return out
 
 
+SERIES_CAP = 200
+
+
+def _downsample(rows: list) -> list:
+    if len(rows) <= SERIES_CAP:
+        return rows
+    step = math.ceil(len(rows) / SERIES_CAP)
+    return rows[::step]
+
+
+def sample_series(detail: dict) -> tuple[dict, list | None]:
+    """Überlagerbare Serien (hr/cadence/speed/elevation/power) + GPS aus den
+    activityDetailMetrics, downgesampelt auf ~200 Punkte. Fehlende/leere Serien
+    werden weggelassen (Lauf hat z. B. keine Power)."""
+    md = detail.get("metricDescriptors") or []
+    idx = {m.get("key"): m.get("metricsIndex") for m in md}
+    rows = _downsample(detail.get("activityDetailMetrics") or [])
+
+    def col(key):
+        i = idx.get(key)
+        if i is None:
+            return None
+        return [(r.get("metrics") or [None])[i] if i < len(r.get("metrics") or []) else None for r in rows]
+
+    def cadence_col():
+        for k in ("directBikeCadence", "directDoubleCadence", "directRunCadence"):
+            c = col(k)
+            if c and any(v is not None for v in c):
+                return c
+        return None
+
+    series: dict = {}
+    for name, c in (("hr", col("directHeartRate")), ("cadence", cadence_col()),
+                    ("speed", col("directSpeed")), ("elevation", col("directElevation")),
+                    ("power", col("directPower"))):
+        if c and any(v is not None for v in c):
+            series[name] = [round(v, 2) if isinstance(v, float) else v for v in c]
+
+    la, lo = col("directLatitude"), col("directLongitude")
+    gps = None
+    if la and lo:
+        pts = [[round(x, 6), round(y, 6)] for x, y in zip(la, lo) if x is not None and y is not None]
+        gps = pts if len(pts) > 1 else None
+    return series, gps
+
+
 def build_activity_detail_payload(a: dict, detail: dict | None) -> dict:
     hz = {f"z{i}": a.get(f"hrTimeInZone_{i}") for i in range(1, 6)}
+    series, gps = sample_series(detail) if detail else ({}, None)
     payload = {
         "hr_curve": build_hr_curve(detail) if detail else [],
         "hr_zones_sec": {k: v for k, v in hz.items() if v is not None},
         "splits": a.get("splitSummaries"),
         "exercise_sets": convert_exercise_sets(a.get("summarizedExerciseSets")),
+        "series": series,
+        "gps": gps,
     }
+    tmin, tmax = a.get("minTemperature"), a.get("maxTemperature")
+    if tmin is not None or tmax is not None:
+        payload["temp"] = {"min": tmin, "max": tmax}
     return payload
 
 
@@ -352,8 +426,9 @@ def sync_activities(days: int, stmts: list[str], summary: dict) -> None:
         # Detail-Payload (HF-Kurve etc.) – Fehler pro Aktivität nur warnen.
         detail = None
         try:
-            detail = api(f"/activity-service/activity/{a['activityId']}/details",
-                         params={"maxChartSize": 200, "maxPolylineSize": 0})
+            # Gedrosselt + 429-tolerant (wie 365-Backfill); Serien/Power/GPS stecken hier.
+            detail = api_retry(f"/activity-service/activity/{a['activityId']}/details",
+                               params={"maxChartSize": 200, "maxPolylineSize": 0})
         except Exception as e:  # noqa: BLE001
             warn(f"Detail für Aktivität {gid} fehlgeschlagen: {e}")
         payload = build_activity_detail_payload(a, detail)
@@ -569,7 +644,10 @@ def sync_scores(dn: str, days: int, stmts: list[str], summary: dict) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=14)
+    ap.add_argument("--only", default="", help="Kommagetrennt nur diese Kategorien (activities,daily,sleep,health,scores)")
     args = ap.parse_args()
+    only = {x.strip() for x in args.only.split(",") if x.strip()}
+    want = lambda n: (not only) or (n in only)  # noqa: E731
 
     log(f"Garmin -> lokale D1 · letzte {args.days} Tage")
     login()
@@ -600,11 +678,11 @@ def main() -> int:
             err(f"Kategorie '{name}' fehlgeschlagen: {e}")
             _failures.append(name)
 
-    cat("activities", lambda: sync_activities(args.days, stmts, summary))
-    cat("daily", lambda: sync_daily(dn, args.days, stmts, summary))
-    cat("sleep", lambda: sync_sleep(dn, args.days, stmts, summary))
-    cat("health", lambda: sync_health(dn, args.days, acts_recent, stmts, summary))
-    cat("scores", lambda: sync_scores(dn, args.days, stmts, summary))
+    if want("activities"): cat("activities", lambda: sync_activities(args.days, stmts, summary))
+    if want("daily"): cat("daily", lambda: sync_daily(dn, args.days, stmts, summary))
+    if want("sleep"): cat("sleep", lambda: sync_sleep(dn, args.days, stmts, summary))
+    if want("health"): cat("health", lambda: sync_health(dn, args.days, acts_recent, stmts, summary))
+    if want("scores"): cat("scores", lambda: sync_scores(dn, args.days, stmts, summary))
 
     if stmts:
         try:
@@ -629,6 +707,25 @@ def main() -> int:
                 log(f"  {c:28} {row.get(c)}")
     except Exception as e:  # noqa: BLE001
         warn(f"Coverage-Report nicht möglich: {e}")
+
+    # Coverage Aktivitäts-Detailausbau (Serien / Power / GPS).
+    if want("activities"):
+        try:
+            cov = d1_query(
+                "SELECT "
+                "(SELECT COUNT(*) FROM activities) AS total, "
+                "(SELECT COUNT(*) FROM activities WHERE avg_power IS NOT NULL) AS mit_power, "
+                "(SELECT COUNT(*) FROM activity_details WHERE json_extract(payload,'$.gps') IS NOT NULL) AS mit_gps, "
+                "(SELECT COUNT(*) FROM activity_details WHERE json_extract(payload,'$.series.cadence') IS NOT NULL) AS mit_cadence, "
+                "(SELECT COUNT(*) FROM activity_details WHERE json_extract(payload,'$.series.speed') IS NOT NULL) AS mit_pace, "
+                "(SELECT COUNT(*) FROM activity_details WHERE json_extract(payload,'$.series.elevation') IS NOT NULL) AS mit_elevation")
+            if cov:
+                r = cov[0]
+                log(f"\n== Aktivitäts-Detail-Coverage (gesamt {r.get('total')}) ==")
+                for k in ["mit_power", "mit_gps", "mit_cadence", "mit_pace", "mit_elevation"]:
+                    log(f"  {k:14} {r.get(k)}")
+        except Exception as e:  # noqa: BLE001
+            warn(f"Aktivitäts-Coverage nicht möglich: {e}")
 
     if _failures:
         err(f"Abgeschlossen mit Fehlern in: {', '.join(_failures)}")

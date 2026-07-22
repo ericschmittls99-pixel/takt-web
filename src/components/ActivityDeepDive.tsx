@@ -28,6 +28,11 @@ const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFi
 function km(m: number) { return (m / 1000).toFixed(1).replace('.', ',') }
 function fmtDur(sec: number) { const m = Math.round(sec / 60); if (m < 60) return `${m} min`; return `${Math.floor(m / 60)}h ${pad(m % 60)}` }
 function paceLbl(distM: number, durSec: number) { const s = durSec / (distM / 1000); return `${Math.floor(s / 60)}:${pad(Math.round(s % 60))}` }
+const nn = (v: number | null | undefined): v is number => typeof v === 'number' && Number.isFinite(v)
+const avg = (vs: number[]) => vs.reduce((s, v) => s + v, 0) / vs.length
+const paceStr = (secPerKm: number) => `${Math.floor(secPerKm / 60)}:${pad(Math.round(secPerKm % 60))}`
+// Power-Zonen-Farben (z1..z7)
+const PZC = ['#94A3B8', '#38BDF8', '#22C55E', '#EAB308', '#F97316', '#EF4444', '#A21CAF']
 function humanize(s: unknown) { return String(s ?? '').toLowerCase().split('_').filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(' ') }
 function fmtKg(w: number) { return Number.isInteger(w) ? String(w) : w.toFixed(1).replace('.', ',') }
 function fmtDate(ts: string | null) {
@@ -68,6 +73,7 @@ export default function ActivityDeepDive({ activityId, employers, projects, onCl
   const [editingEx, setEditingEx] = useState(false)
   const [savingEx, setSavingEx] = useState(false)
   const [exForm, setExForm] = useState<{ name: string; sets: string; reps: string; max_weight: string }[]>([])
+  const [gm, setGm] = useState<string[]>(['hr'])  // aktive Verlaufs-Metriken (überlagerbar)
 
   function load() {
     setLoading(true)
@@ -175,6 +181,16 @@ export default function ActivityDeepDive({ activityId, employers, projects, onCl
     if (a.vo2max != null) kpis.push({ k: 'VO₂max', v: String(Math.round(a.vo2max)), u: '' })
     if (a.total_sets) kpis.push({ k: 'Sätze', v: String(a.total_sets), u: '' })
     if (a.total_reps) kpis.push({ k: 'Wdh', v: a.total_reps.toLocaleString('de-DE'), u: '' })
+    // Aus den Detailserien (nur falls im Payload vorhanden):
+    const cadVals = (details.series?.cadence ?? []).filter(nn)
+    if (cadVals.length > 1) {
+      kpis.push({ k: 'Ø Cadence', v: String(Math.round(avg(cadVals))), u: isBike ? 'rpm' : 'spm' })
+      kpis.push({ k: 'Max Cadence', v: String(Math.round(Math.max(...cadVals))), u: isBike ? 'rpm' : 'spm' })
+    }
+    const spdVals = (details.series?.speed ?? []).filter(nn).filter((v) => v > 0.3)
+    if (spdVals.length > 1 && !isBike) kpis.push({ k: 'Beste Pace', v: paceStr(1000 / Math.max(...spdVals)), u: '/km' })
+    const t = details.temp
+    if (t && (t.min != null || t.max != null)) kpis.push({ k: 'Temperatur', v: t.max != null ? `${Math.round(t.max)}` : `${Math.round(t.min as number)}`, u: '°C' })
   }
 
   // HF-Zonen
@@ -183,10 +199,43 @@ export default function ActivityDeepDive({ activityId, employers, projects, onCl
   const zTot = zvals.reduce((s, v) => s + v, 0)
   const hasZones = zvals.some((v) => v > 0)
 
-  // HF-Kurve
-  const curveVals = (details.hr_curve ?? []).map((p) => num(p?.v)).filter((v): v is number => v != null)
-  const hasCurve = curveVals.length > 1
-  const g = hasCurve ? geom(curveVals, 620, 150, 8) : []
+  // Multi-Metrik-Verlauf (5.1): HF/Cadence/Pace/Elevation überlagerbar; Power nur bei Rad-mit-Power.
+  const S = details.series ?? {}
+  const hrArr: (number | null)[] = S.hr ?? (details.hr_curve ?? []).map((p) => (p && nn(p.v) ? p.v : null))
+  const speedArr: (number | null)[] = S.speed ?? []
+  type Metric = { key: string; label: string; color: string; unit: string; plot: (number | null)[]; stat: string }
+  const metricDefs: Metric[] = []
+  const addMetric = (key: string, label: string, color: string, unit: string, plot: (number | null)[], statFn: (vs: number[]) => string) => {
+    const vs = plot.filter(nn)
+    if (vs.length > 1) metricDefs.push({ key, label, color, unit, plot, stat: statFn(vs) })
+  }
+  const mm = (vs: number[]) => `ø ${Math.round(avg(vs))} · max ${Math.round(Math.max(...vs))}`
+  addMetric('hr', 'Herzfrequenz', '#EF4444', 'bpm', hrArr, mm)
+  addMetric('cadence', 'Cadence', '#7C5CFF', isBike ? 'rpm' : 'spm', S.cadence ?? [], mm)
+  addMetric('pace', 'Pace', '#2563EB', '/km', speedArr, () => (a?.distance_m && a?.duration_sec ? `ø ${paceStr(a.duration_sec / (a.distance_m / 1000))} · best ${paceStr(1000 / Math.max(...speedArr.filter(nn).filter((v) => v > 0.3)))}` : ''))
+  addMetric('elevation', 'Höhe', '#22C55E', 'm', S.elevation ?? [], (vs) => `${Math.round(Math.min(...vs))}–${Math.round(Math.max(...vs))}`)
+  // Power im Graph nur bei Rad-mit-Power (Laufleistung wird bewusst nicht gezeigt).
+  if (isBike && a?.avg_power != null) addMetric('power', 'Power', '#F59E0B', 'W', S.power ?? [], mm)
+  const hasGraph = metricDefs.length > 0
+  const activeKeys = (() => { const base = gm.filter((k) => metricDefs.some((m) => m.key === k)); return base.length ? base : metricDefs[0] ? [metricDefs[0].key] : [] })()
+
+  // Power (5.4) — nur Rad-mit-Powermeter. Laufleistung (avg_power bei Läufen) wird NICHT als Block gezeigt.
+  const hasPower = isBike && a?.avg_power != null
+  const pz = (() => { try { return a?.power_zones ? (JSON.parse(a.power_zones) as Record<string, number>) : null } catch { return null } })()
+  const pzVals = pz ? [1, 2, 3, 4, 5, 6, 7].map((i) => num(pz[`z${i}`]) ?? 0) : []
+  const pzTot = pzVals.reduce((s, v) => s + v, 0)
+  const powerKpis: { k: string; v: string; u: string; note?: string }[] = []
+  if (a) {
+    if (a.avg_power != null) powerKpis.push({ k: 'Ø Power', v: String(Math.round(a.avg_power)), u: 'W' })
+    if (a.max_power != null) powerKpis.push({ k: 'Max Power', v: String(Math.round(a.max_power)), u: 'W' })
+    if (a.norm_power != null) powerKpis.push({ k: 'NP', v: String(Math.round(a.norm_power)), u: 'W' })
+    if (a.max_20min_power != null) powerKpis.push({ k: 'Max 20 min', v: String(Math.round(a.max_20min_power)), u: 'W' })
+    if (a.intensity_factor != null) powerKpis.push({ k: 'IF', v: a.intensity_factor.toFixed(2).replace('.', ','), u: '' })
+    if (a.training_stress_score != null) powerKpis.push({ k: 'TSS', v: String(Math.round(a.training_stress_score)), u: '' })
+    if (a.avg_lr_balance != null) powerKpis.push({ k: 'L/R-Balance', v: `${Math.round(a.avg_lr_balance)}/${Math.round(100 - a.avg_lr_balance)}`, u: '%' })
+    if (a.work_kj != null) powerKpis.push({ k: 'Work', v: Math.round(a.work_kj).toLocaleString('de-DE'), u: 'kJ', note: 'berechnet' })
+    if (a.pedal_strokes != null) powerKpis.push({ k: 'Pedal Strokes', v: a.pedal_strokes.toLocaleString('de-DE'), u: '' })
+  }
 
   // Splits (nur mit echter Distanz -> Kraft fällt raus)
   const splits = (details.splits ?? [])
@@ -342,26 +391,80 @@ export default function ActivityDeepDive({ activityId, employers, projects, onCl
               </div>
             )}
 
-            {/* HF-Kurve */}
-            {hasCurve && (
+            {/* Multi-Metrik-Verlauf (5.1) */}
+            {hasGraph && (
               <div style={{ padding: '20px 28px 28px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                  <div style={kicker}>Herzfrequenz-Verlauf</div>
-                  <div style={{ display: 'flex', gap: 16, fontSize: 12, fontWeight: 800, color: 'var(--ink2)', fontVariantNumeric: 'tabular-nums' }}>
-                    <div>min <span style={{ color: 'var(--ink)' }}>{Math.round(Math.min(...curveVals))}</span></div>
-                    {a.avg_hr != null && <div>ø <span style={{ color: 'var(--ink)' }}>{Math.round(a.avg_hr)}</span></div>}
-                    <div>max <span style={{ color: '#EF4444' }}>{Math.round(a.max_hr ?? Math.max(...curveVals))}</span></div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, gap: 12, flexWrap: 'wrap' }}>
+                  <div style={kicker}>Verlauf</div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {metricDefs.map((m) => { const on = activeKeys.includes(m.key); return (
+                      <div key={m.key} onClick={() => setGm((cur) => { const base = cur.filter((k) => metricDefs.some((x) => x.key === k)); const next = base.includes(m.key) ? base.filter((k) => k !== m.key) : [...base, m.key]; return next.length ? next : [m.key] })}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 11px', borderRadius: 10, cursor: 'pointer', fontSize: 12, fontWeight: 800, border: `1px solid ${on ? m.color : 'var(--hair)'}`, background: on ? hexA(m.color, 0.14) : 'var(--track)', color: on ? m.color : 'var(--ink3)' }}>
+                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: m.color, opacity: on ? 1 : 0.4 }} />{m.label}
+                      </div>
+                    ) })}
                   </div>
+                </div>
+                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 10 }}>
+                  {metricDefs.filter((m) => activeKeys.includes(m.key)).map((m) => (
+                    <div key={m.key} style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--ink2)', fontVariantNumeric: 'tabular-nums' }}>
+                      <span style={{ color: m.color }}>■</span> {m.label} <span style={{ color: 'var(--ink3)' }}>{m.stat} {m.unit}</span>
+                    </div>
+                  ))}
                 </div>
                 <div style={{ background: 'var(--card)', border: '1px solid var(--hair)', borderRadius: 16, padding: '14px 12px' }}>
                   <svg width="100%" height="150" viewBox="0 0 620 150" preserveAspectRatio="none" style={{ display: 'block', overflow: 'visible' }}>
                     <line x1="0" y1="37.5" x2="620" y2="37.5" stroke="var(--hair)" strokeWidth="1" />
                     <line x1="0" y1="75" x2="620" y2="75" stroke="var(--hair)" strokeWidth="1" />
                     <line x1="0" y1="112.5" x2="620" y2="112.5" stroke="var(--hair)" strokeWidth="1" />
-                    <path d={areaD(g, 150)} fill={hexA(color, 0.13)} stroke="none" />
-                    <path d={lineD(g)} fill="none" stroke={color} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+                    {metricDefs.filter((m) => activeKeys.includes(m.key)).map((m) => { const gg = geom(m.plot.filter(nn), 620, 150, 8); return (
+                      <g key={m.key}>
+                        {activeKeys.length === 1 && <path d={areaD(gg, 150)} fill={hexA(m.color, 0.13)} stroke="none" />}
+                        <path d={lineD(gg)} fill="none" stroke={m.color} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+                      </g>
+                    ) })}
                   </svg>
                 </div>
+              </div>
+            )}
+
+            {/* Power (5.4) — nur Rad-mit-Powermeter */}
+            {hasPower && (
+              <div style={{ padding: '4px 28px 20px' }}>
+                <div style={{ ...kicker, marginBottom: 12 }}>Leistung (Power)</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+                  {powerKpis.map((k, i) => (
+                    <div key={i} style={{ background: 'var(--card)', border: '1px solid var(--hair)', borderRadius: 16, padding: '14px 15px' }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+                        <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.6px', color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{k.v}</div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink3)' }}>{k.u}</div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5 }}>
+                        <div style={{ ...kicker, fontSize: 10.5 }}>{k.k}</div>
+                        {k.note && <div style={{ fontSize: 8.5, fontWeight: 800, letterSpacing: '0.4px', textTransform: 'uppercase', padding: '1px 5px', borderRadius: 5, background: 'var(--track)', color: 'var(--ink3)', border: '1px dashed var(--hair)' }}>{k.note}</div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {pzTot > 0 && (
+                  <div style={{ marginTop: 18 }}>
+                    <div style={{ ...kicker, marginBottom: 12 }}>Power-Zonen</div>
+                    <div style={{ display: 'flex', height: 14, borderRadius: 8, overflow: 'hidden', background: 'var(--track)' }}>
+                      {pzVals.map((sec, i) => (<div key={i} style={{ width: `${(sec / pzTot) * 100}%`, background: PZC[i] }} />))}
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12, gap: 6 }}>
+                      {pzVals.map((sec, i) => (
+                        <div key={i} style={{ flex: 1, textAlign: 'center' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                            <div style={{ width: 8, height: 8, borderRadius: 2, background: PZC[i] }} />
+                            <div style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--ink2)' }}>Z{i + 1}</div>
+                          </div>
+                          <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--ink)', marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>{Math.round(sec / 60)}′</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

@@ -83,6 +83,16 @@ export interface GarminActivity {
   aerobic_te: number | null
   anaerobic_te: number | null
   vo2max: number | null
+  avg_power: number | null
+  max_power: number | null
+  norm_power: number | null
+  max_20min_power: number | null
+  intensity_factor: number | null
+  training_stress_score: number | null
+  avg_lr_balance: number | null
+  pedal_strokes: number | null
+  work_kj: number | null
+  power_zones: string | null
   total_reps: number | null
   total_sets: number | null
   status: 'inbox' | 'assigned' | 'ignored' | 'history'
@@ -103,6 +113,9 @@ export interface ActivityDetailPayload {
   hr_zones_sec?: Record<string, number>
   splits?: Record<string, unknown>[]
   exercise_sets?: Record<string, unknown>[]
+  series?: { hr?: (number | null)[]; cadence?: (number | null)[]; speed?: (number | null)[]; elevation?: (number | null)[]; power?: (number | null)[] }
+  gps?: [number, number][] | null
+  temp?: { min: number | null; max: number | null } | null
 }
 export interface GarminActivityDetail extends GarminActivity {
   details: ActivityDetailPayload | null
