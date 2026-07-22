@@ -162,6 +162,18 @@ def existing_keys(table: str, col: str) -> set:
     return {r["k"] for r in rows}
 
 
+def write_sync_stamp(status: str) -> None:
+    """Sync-Stand (ISO-Zeit + ok|partial) direkt in die lokale D1 schreiben —
+    kein HTTP-Endpunkt, weil pages dev beim launchd-Lauf nicht läuft."""
+    now = datetime.now().astimezone().replace(microsecond=0).isoformat()
+    d1_exec_file(
+        f"INSERT INTO app_settings (key, value) VALUES ('garmin_last_sync', {q(now)}) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value;\n"
+        f"INSERT INTO app_settings (key, value) VALUES ('garmin_last_sync_status', {q(status)}) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value;")
+    log(f"[OK] Sync-Stand: {now} ({status})")
+
+
 # --------------------------------------------------------------------------- #
 # Feld-Mapping (6.4)
 # --------------------------------------------------------------------------- #
@@ -831,6 +843,12 @@ def main() -> int:
                 log(f"  ohne Kurvendaten  {leer}  (ältere/ohne Intraday bei Garmin)")
         except Exception as e:  # noqa: BLE001
             warn(f"Intraday-Coverage nicht möglich: {e}")
+
+    # Sync-Stand setzen — auch bei Teilfehlern (Status partial), damit die App den Stand zeigt.
+    try:
+        write_sync_stamp("partial" if _failures else "ok")
+    except Exception as e:  # noqa: BLE001
+        warn(f"Sync-Stand konnte nicht geschrieben werden: {e}")
 
     if _failures:
         err(f"Abgeschlossen mit Fehlern in: {', '.join(_failures)}")

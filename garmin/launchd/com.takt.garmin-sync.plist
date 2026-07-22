@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.takt.garmin-sync</string>
+
+  <!-- Startet den Wrapper (setzt PATH, cd ins Repo, sync.py --days 3, Logging).
+       Repo liegt außerhalb ~/Documents -> kein macOS-TCC, keine Sonderfreigabe nötig. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/ericschmitt/Takt-Web/garmin/launchd/run-sync.sh</string>
+  </array>
+
+  <!-- 4x/Tag: 09:00 / 15:00 / 21:00 / 03:00 -->
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>15</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>21</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>0</integer></dict>
+  </array>
+
+  <!-- launchd-eigene Ausgaben (Wrapper-Start/-Fehler). Der eigentliche Sync-Log ist garmin/logs/sync.log. -->
+  <key>StandardOutPath</key>
+  <string>/Users/ericschmitt/Takt-Web/garmin/logs/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/ericschmitt/Takt-Web/garmin/logs/launchd.err.log</string>
+
+  <!-- Beim Laden NICHT sofort feuern; nur zu den geplanten Zeiten. -->
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>

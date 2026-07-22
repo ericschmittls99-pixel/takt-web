@@ -34,6 +34,8 @@ export interface AppSettings {
   absence_types: string // JSON-Array (AbsenceTypeConfig[])
   hotkeys: string // JSON-Objekt (CommandId → Kombi-String, z. B. "mod+k")
   puls_trends_layout: string // JSON { visible: string[], hidden: string[] }
+  garmin_last_sync?: string // ISO-Zeit des letzten Sync-Laufs (vom launchd-Sync gesetzt)
+  garmin_last_sync_status?: string // 'ok' | 'partial'
 }
 
 export interface Project {

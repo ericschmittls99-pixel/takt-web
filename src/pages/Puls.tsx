@@ -26,6 +26,16 @@ const dateFromKey = (k: string) => { const [y, m, d] = k.split('-').map(Number);
 const parseTs = (ts: string) => new Date(ts.includes('T') ? ts : ts.replace(' ', 'T'))
 function fmtDur(min: number) { if (min < 60) return `${Math.round(min)} min`; return `${Math.floor(min / 60)}h ${pad(Math.round(min % 60))}` }
 function kmStr(m: number | null) { return m ? (m / 1000).toFixed(1).replace('.', ',') + ' km' : '–' }
+function relTime(iso?: string): string {
+  if (!iso) return ''
+  const t = new Date(iso).getTime()
+  if (Number.isNaN(t)) return ''
+  const s = Math.max(0, (Date.now() - t) / 1000)
+  if (s < 90) return 'gerade eben'
+  const m = s / 60; if (m < 90) return `vor ${Math.round(m)} Min`
+  const h = m / 60; if (h < 36) return `vor ${Math.round(h)} Std`
+  return `vor ${Math.round(h / 24)} Tg`
+}
 function hexA(hex: string, a: number) {
   const h = hex.replace('#', '')
   if (h.length !== 6) return `color-mix(in srgb, ${hex} ${Math.round(a * 100)}%, transparent)`
@@ -155,6 +165,11 @@ export default function Puls({ theme, onBack, onOpenTodos, onOpenCalendar, onOpe
             ))}
           </div>
           <div style={{ flex: 1 }} />
+          {settings.garmin_last_sync && (
+            <div title={`Letzter Garmin-Sync: ${new Date(settings.garmin_last_sync).toLocaleString('de-DE')}${settings.garmin_last_sync_status === 'partial' ? ' — teilweise' : ''}`} style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink3)', whiteSpace: 'nowrap' }}>
+              Garmin-Stand: {relTime(settings.garmin_last_sync)}{settings.garmin_last_sync_status === 'partial' ? ' · teilweise' : ''}
+            </div>
+          )}
           <div onClick={onOpenSpotlight} title="Suche (Spotlight)" style={iconBtn}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
           </div>
