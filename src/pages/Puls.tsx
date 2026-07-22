@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
-import { api, type AppSettings, type Employer, type GarminDaily, type GarminSleep, type PlannedBlock, type PlannedOverride, type Project, type Workout } from '../api'
+import { api, type AppSettings, type Employer, type GarminDaily, type GarminScores, type GarminSleep, type PlannedBlock, type PlannedOverride, type Project, type Workout } from '../api'
 import { employerColor } from '../colors'
 import { holidayName } from '../holidays'
 import InboxPopover from '../components/InboxPopover'
@@ -29,6 +29,11 @@ function hexA(hex: string, a: number) {
   const h = hex.replace('#', '')
   if (h.length !== 6) return `color-mix(in srgb, ${hex} ${Math.round(a * 100)}%, transparent)`
   return `rgba(${parseInt(h.slice(0, 2), 16)},${parseInt(h.slice(2, 4), 16)},${parseInt(h.slice(4, 6), 16)},${a})`
+}
+function sparkPath(vals: number[], w: number, h: number, p = 3): string {
+  if (vals.length < 2) return ''
+  const mn = Math.min(...vals), mx = Math.max(...vals), r = mx - mn || 1, sx = w / (vals.length - 1)
+  return vals.map((v, i) => `${i ? 'L' : 'M'}${(i * sx).toFixed(1)} ${(p + (h - 2 * p) - ((v - mn) / r) * (h - 2 * p)).toFixed(1)}`).join(' ')
 }
 const GLASS: CSSProperties = { background: 'var(--glass)', backdropFilter: 'blur(20px) saturate(180%)', WebkitBackdropFilter: 'blur(20px) saturate(180%)', border: '1px solid var(--hair)' }
 const CARD: CSSProperties = { background: 'var(--card)', backdropFilter: 'blur(20px) saturate(180%)', WebkitBackdropFilter: 'blur(20px) saturate(180%)', border: '1px solid var(--border)', boxShadow: 'var(--card-shadow, 0 22px 48px -30px rgba(17,24,39,0.5))' }
@@ -69,6 +74,8 @@ export default function Puls({ theme, onBack, onOpenTodos, onOpenCalendar, onOpe
   const [workouts, setWorkouts] = useState<Workout[]>([])
   const [daily, setDaily] = useState<GarminDaily | null>(null)
   const [sleep, setSleep] = useState<GarminSleep | null>(null)
+  const [sleepRange, setSleepRange] = useState<GarminSleep[]>([])
+  const [scoresRange, setScoresRange] = useState<GarminScores[]>([])
   const [planned, setPlanned] = useState<PlannedBlock[]>([])
   const [overrides, setOverrides] = useState<PlannedOverride[]>([])
   const [deepId, setDeepId] = useState<number | null>(null)
@@ -85,6 +92,9 @@ export default function Puls({ theme, onBack, onOpenTodos, onOpenCalendar, onOpe
     api.getOverrides().then(setOverrides).catch(() => {})
     api.getGarminDaily(todayKey, todayKey).then((r) => setDaily(r[0] ?? null)).catch(() => {})
     api.getGarminSleep(todayKey, todayKey).then((r) => setSleep(r[0] ?? null)).catch(() => {})
+    const from40 = dayKey(addDays(new Date(), -40))
+    api.getGarminSleep(from40, todayKey).then(setSleepRange).catch(() => {})
+    api.getGarminScores(from40, todayKey).then(setScoresRange).catch(() => {})
   }
   useEffect(loadAll, [todayKey])
 
@@ -151,9 +161,10 @@ export default function Puls({ theme, onBack, onOpenTodos, onOpenCalendar, onOpe
 
         {seg === 'heute' && <Heute daily={daily} sleep={sleep} workouts={workouts} weekWorkouts={weekWorkouts} weekPlanned={weekPlanned} weekDates={weekDates} todayKey={todayKey} view={view} colorOf={colorOf} openWorkout={openWorkout} onOpenDay={onOpenDay} />}
         {seg === 'workouts' && <Workouts workouts={workouts} employers={employers} view={view} colorOf={colorOf} openWorkout={openWorkout} typeFilter={typeFilter} setTypeFilter={setTypeFilter} areaFilter={areaFilter} setAreaFilter={setAreaFilter} rangeFilter={rangeFilter} setRangeFilter={setRangeFilter} monday={monday} />}
-        {(seg === 'schlaf' || seg === 'trends') && (
+        {seg === 'schlaf' && <Schlaf sleepRange={sleepRange} scoresRange={scoresRange} />}
+        {seg === 'trends' && (
           <div style={{ ...CARD, borderRadius: 24, padding: '60px 26px', textAlign: 'center', color: 'var(--ink3)', fontWeight: 700 }}>
-            {seg === 'schlaf' ? 'Schlaf & Erholung' : 'Trends'} — kommt in {seg === 'schlaf' ? 'WP4c' : 'WP4d'}.
+            Trends — kommt in WP4d.
           </div>
         )}
       </div>
@@ -415,6 +426,178 @@ function Workouts({ workouts, employers, view, colorOf, openWorkout, typeFilter,
               </div>
             ))}
           </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Schlaf & Erholung (WP4c-1)
+function fmtDurSec(sec: number) { const m = Math.round(sec / 60); return m < 60 ? `${m} min` : `${Math.floor(m / 60)}h ${pad(m % 60)}` }
+const PHASES = [
+  { lvl: 0, name: 'Tief', color: '#2563EB', sec: 'deep_sec' as const },
+  { lvl: 1, name: 'Leicht', color: '#7C5CFF', sec: 'light_sec' as const },
+  { lvl: 2, name: 'REM', color: '#14B8A6', sec: 'rem_sec' as const },
+  { lvl: 3, name: 'Wach', color: '#F59E0B', sec: 'awake_sec' as const },
+]
+const phaseColor = (lvl: number) => PHASES.find((p) => p.lvl === Math.round(lvl))?.color ?? '#94A3B8'
+const segSec = (s: { startGMT: string; endGMT: string }) => Math.max(0, (new Date(s.endGMT.slice(0, 19)).getTime() - new Date(s.startGMT.slice(0, 19)).getTime()) / 1000)
+const NEED_FB: Record<string, string> = { INCREASED: 'erhöht', DECREASED: 'verringert', NO_CHANGE_NO_ADJUSTMENTS: 'unverändert', NO_CHANGE: 'unverändert' }
+
+function Schlaf({ sleepRange, scoresRange }: { sleepRange: GarminSleep[]; scoresRange: GarminScores[] }) {
+  const nights = useMemo(() => sleepRange.filter((s) => s.total_sec != null || s.score != null), [sleepRange]) // Lücken raus
+  const [selDate, setSelDate] = useState<string | null>(null)
+  const [period, setPeriod] = useState<'week' | 'month'>('week')
+  const scoresByDate = useMemo(() => new Map(scoresRange.map((s) => [s.calendar_date, s])), [scoresRange])
+  if (nights.length === 0) return <div style={{ ...CARD, borderRadius: 24, padding: '48px 26px', textAlign: 'center', color: 'var(--ink3)', fontWeight: 700 }}>Noch keine Schlafdaten.</div>
+
+  const sel = nights.find((n) => n.calendar_date === selDate) ?? nights[0]
+  const curves = sel.curves && typeof sel.curves === 'object' ? sel.curves : null
+  const levels = curves?.levels ?? []
+  const totalLevels = levels.reduce((a, s) => a + segSec(s), 0) || 1
+  const readiness = scoresByDate.get(sel.calendar_date)
+  const selD = new Date(`${sel.calendar_date}T00:00:00`)
+
+  const kpis: [string, string, string][] = []
+  if (sel.total_sec != null) kpis.push(['Dauer', fmtDurSec(sel.total_sec), ''])
+  if (sel.score != null) kpis.push(['Score', String(sel.score), sel.score_qualifier ?? ''])
+  if (sel.hrv_overnight_avg != null) kpis.push(['HRV', String(Math.round(sel.hrv_overnight_avg)), sel.hrv_status ?? ''])
+  if (sel.body_battery_change != null) kpis.push(['Body Battery', `+${sel.body_battery_change}`, 'über Nacht'])
+  if (sel.avg_stress != null) kpis.push(['Ø Stress', String(sel.avg_stress), ''])
+  if (sel.resting_hr != null) kpis.push(['Ruhepuls', `${sel.resting_hr}`, 'bpm'])
+  if (sel.restless_moments != null) kpis.push(['Unruhe', String(sel.restless_moments), 'Momente'])
+  if (readiness?.training_readiness_score != null) kpis.push(['Readiness', String(readiness.training_readiness_score), readiness.tr_level ?? ''])
+
+  const periodNights = period === 'week' ? nights.slice(0, 7) : nights.slice(0, 30)
+  const chrono = [...periodNights].reverse()
+  const trendDefs = [
+    { label: 'Schlaf-Score', unit: '', color: '#7C5CFF', up: 'good', get: (n: GarminSleep) => n.score },
+    { label: 'HRV', unit: 'ms', color: '#14B8A6', up: 'good', get: (n: GarminSleep) => n.hrv_overnight_avg },
+    { label: 'Body Battery', unit: '', color: '#22C55E', up: 'good', get: (n: GarminSleep) => n.body_battery_change },
+    { label: 'Ø Stress', unit: '', color: '#F59E0B', up: 'bad', get: (n: GarminSleep) => n.avg_stress },
+  ] as const
+
+  const miniCurves = curves ? ([['HF', curves.hr, '#EF4444'], ['Stress', curves.stress, '#F59E0B'], ['Body Battery', curves.body_battery, '#22C55E']] as const).filter(([, arr]) => Array.isArray(arr) && arr.length > 1) : []
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      {/* Nacht-Auswahl */}
+      <div className="no-scrollbar" style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 2 }}>
+        {nights.slice(0, 14).map((n) => {
+          const on = n.calendar_date === sel.calendar_date
+          const d = new Date(`${n.calendar_date}T00:00:00`)
+          return (
+            <div key={n.calendar_date} onClick={() => setSelDate(n.calendar_date)} style={{ flex: 'none', minWidth: 70, textAlign: 'center', padding: '10px 12px', borderRadius: 14, cursor: 'pointer', background: on ? 'color-mix(in srgb, var(--accent) 12%, var(--track))' : 'var(--track)', border: on ? '1.5px solid color-mix(in srgb, var(--accent) 45%, transparent)' : '1px solid var(--hair)' }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: on ? 'var(--accent)' : 'var(--ink2)' }}>{WD[d.getDay()]} {d.getDate()}.</div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums', marginTop: 3 }}>{n.score ?? '–'}</div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Gewählte Nacht */}
+      <div style={{ ...CARD, borderRadius: 24, padding: '22px 24px' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 16 }}>
+          <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-0.4px' }}>{selD.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
+          {sel.total_sec != null && <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink2)' }}>{fmtDurSec(sel.total_sec)} geschlafen</div>}
+        </div>
+
+        {/* Phasen-Balken */}
+        {levels.length > 0 && (
+          <div>
+            <div style={{ display: 'flex', height: 22, borderRadius: 8, overflow: 'hidden', background: 'var(--track)' }}>
+              {levels.map((s, i) => <div key={i} title={`${PHASES.find((p) => p.lvl === Math.round(s.activityLevel))?.name ?? ''}`} style={{ width: `${(segSec(s) / totalLevels) * 100}%`, background: phaseColor(s.activityLevel) }} />)}
+            </div>
+            <div style={{ display: 'flex', gap: 18, marginTop: 12, flexWrap: 'wrap' }}>
+              {PHASES.map((p) => { const v = sel[p.sec]; return (
+                <div key={p.lvl} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                  <div style={{ width: 9, height: 9, borderRadius: 3, background: p.color }} />
+                  <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--ink2)' }}>{p.name}</div>
+                  <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{v != null ? fmtDurSec(v) : '–'}</div>
+                </div>
+              ) })}
+            </div>
+          </div>
+        )}
+
+        {/* Kern-KPIs */}
+        {kpis.length > 0 && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 12, marginTop: 18 }}>
+            {kpis.map(([k, v, sub]) => (
+              <div key={k} style={{ background: 'var(--track)', borderRadius: 14, padding: '13px 14px' }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+                  <div style={{ fontSize: 21, fontWeight: 800, letterSpacing: '-0.5px', fontVariantNumeric: 'tabular-nums' }}>{v}</div>
+                  {sub && <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink3)' }}>{sub}</div>}
+                </div>
+                <div style={{ ...kicker, fontSize: 10.5, marginTop: 5 }}>{k}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Sleep Need */}
+        {sel.sleep_need_actual != null && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 18, padding: '12px 16px', borderRadius: 14, background: 'var(--track)' }}>
+            <div style={{ ...kicker, fontSize: 10.5 }}>Schlafbedarf</div>
+            <div style={{ fontSize: 15, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{fmtDurSec(sel.sleep_need_actual * 60)}</div>
+            {sel.sleep_need_baseline != null && <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--ink3)' }}>Basis {fmtDurSec(sel.sleep_need_baseline * 60)}</div>}
+            <div style={{ flex: 1 }} />
+            {sel.sleep_need_feedback && <div style={{ fontSize: 11.5, fontWeight: 800, padding: '4px 10px', borderRadius: 8, background: 'color-mix(in srgb, var(--accent) 14%, transparent)', color: 'var(--accent)' }}>{NEED_FB[sel.sleep_need_feedback] ?? sel.sleep_need_feedback}</div>}
+          </div>
+        )}
+
+        {/* Mini-Kurven der Nacht */}
+        {miniCurves.length > 0 && (
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${miniCurves.length}, 1fr)`, gap: 12, marginTop: 18 }}>
+            {miniCurves.map(([label, arr, color]) => {
+              const vals = (arr as { t: number; v: number }[]).map((p) => p.v)
+              return (
+                <div key={label} style={{ background: 'var(--track)', borderRadius: 14, padding: '12px 14px' }}>
+                  <div style={{ ...kicker, fontSize: 10.5, marginBottom: 8 }}>{label} · Nacht</div>
+                  <svg width="100%" height="40" viewBox="0 0 200 40" preserveAspectRatio="none" style={{ display: 'block', overflow: 'visible' }}>
+                    <path d={sparkPath(vals, 200, 40, 4)} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Trends */}
+      <div style={{ ...CARD, borderRadius: 24, padding: '22px 24px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+          <div style={kicker}>Verlauf · {period === 'week' ? 'Woche' : 'Monat'}</div>
+          <div style={{ display: 'flex', padding: 3, gap: 3, borderRadius: 12, background: 'var(--track)' }}>
+            {(['week', 'month'] as const).map((p) => (
+              <div key={p} onClick={() => setPeriod(p)} style={{ padding: '6px 13px', borderRadius: 9, fontSize: 12.5, fontWeight: 800, cursor: 'pointer', color: period === p ? 'var(--ink)' : 'var(--ink3)', background: period === p ? 'var(--seg-active, #fff)' : 'transparent' }}>{p === 'week' ? 'Woche' : 'Monat'}</div>
+            ))}
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
+          {trendDefs.map((t) => {
+            const series = chrono.map(t.get).filter((v): v is number => v != null)
+            if (series.length === 0) return <div key={t.label} style={{ background: 'var(--track)', borderRadius: 18, padding: '16px 18px', color: 'var(--ink3)', fontWeight: 700, fontSize: 12.5 }}>{t.label} · keine Daten</div>
+            const avg = Math.round(series.reduce((a, b) => a + b, 0) / series.length)
+            const delta = Math.round(series[series.length - 1] - series[0])
+            const good = t.up === 'good' ? delta >= 0 : delta <= 0
+            return (
+              <div key={t.label} style={{ background: 'var(--track)', borderRadius: 18, padding: '16px 18px' }}>
+                <div style={{ ...kicker, fontSize: 10.5 }}>{t.label}</div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, marginTop: 10 }}>
+                  <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.8px', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{avg}</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink3)' }}>{t.unit || 'Ø'}</div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
+                  <svg width="120" height="30" viewBox="0 0 120 30" preserveAspectRatio="none" style={{ overflow: 'visible' }}>
+                    <path d={sparkPath(series, 120, 30, 3)} fill="none" stroke={t.color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  <div style={{ fontSize: 12.5, fontWeight: 800, color: delta === 0 ? 'var(--ink3)' : good ? '#22C55E' : '#EF4444' }}>{delta > 0 ? '+' : ''}{delta}</div>
+                </div>
+              </div>
+            )
+          })}
         </div>
       </div>
     </div>

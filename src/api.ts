@@ -125,6 +125,13 @@ export interface GarminDaily {
   spo2_avg: number | null
   sleeping_sec: number | null
 }
+export interface SleepCurves {
+  hr: { t: number; v: number }[]
+  stress: { t: number; v: number }[]
+  body_battery: { t: number; v: number }[]
+  movement: { t: number; v: number }[]
+  levels: { startGMT: string; endGMT: string; activityLevel: number }[]
+}
 export interface GarminSleep {
   calendar_date: string
   total_sec: number | null
@@ -135,7 +142,15 @@ export interface GarminSleep {
   score: number | null
   score_qualifier: string | null
   hrv_status: string | null
+  hrv_overnight_avg: number | null
   resting_hr: number | null
+  avg_stress: number | null
+  body_battery_change: number | null
+  restless_moments: number | null
+  sleep_need_baseline: number | null
+  sleep_need_actual: number | null
+  sleep_need_feedback: string | null
+  curves?: SleepCurves | null
 }
 
 export interface GarminScores {
