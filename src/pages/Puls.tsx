@@ -210,7 +210,6 @@ export default function Puls({ theme, onBack, onOpenTodos, onOpenCalendar, onOpe
   const hWeekDates = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(hMonday, i)), [hMonday])
   const hWeekWorkouts = useMemo(() => workouts.filter((w) => { const k = dayKey(parseTs(w.start_ts)); return k >= dayKey(hWeekDates[0]) && k <= dayKey(hWeekDates[6]) }), [workouts, hWeekDates])
   const hWeekPlanned = useMemo(() => hWeekDates.flatMap((d) => resolvePlanned(planned, overrides, d, settings.bundesland).filter((b) => sportIds.has(b.employer_id)).map((b) => ({ ...b, date: d }))), [planned, overrides, hWeekDates, settings.bundesland, sportIds])
-  const hLastWorkout = useMemo(() => (workouts as Workout[]).find((w) => dayKey(parseTs(w.start_ts)) <= hKey), [workouts, hKey])
   const canForward = dayKey(hDay) < dayKey(latestDay)
 
   // ---- Deep-Dive öffnen (nur bei verknüpfter Aktivität) ----
@@ -256,7 +255,7 @@ export default function Puls({ theme, onBack, onOpenTodos, onOpenCalendar, onOpe
           <div style={{ fontSize: 44, fontWeight: 800, letterSpacing: '-1.4px', lineHeight: 1, marginTop: 6 }}>{viewTitle}</div>
         </div>
 
-        {seg === 'heute' && <Heute daily={hDaily} sleep={hSleep} scores={hScores} intraday={hIntraday} lastWorkout={hLastWorkout} workouts={workouts} weekWorkouts={hWeekWorkouts} weekPlanned={hWeekPlanned} weekDates={hWeekDates} selKey={hKey} realTodayKey={todayKey} hDay={hDay} canForward={canForward} showLatest={dayKey(hDay) < dayKey(latestDay)} onPrev={() => setHeuteDay(addDays(hDay, -1))} onNext={() => { if (canForward) setHeuteDay(addDays(hDay, 1)) }} onLatest={() => setHeuteDay(null)} onOpenDaySel={(d: Date) => { if (dayKey(d) <= dayKey(latestDay)) setHeuteDay(startOfDay(d)) }} view={view} colorOf={colorOf} openWorkout={openWorkout} />}
+        {seg === 'heute' && <Heute daily={hDaily} sleep={hSleep} scores={hScores} intraday={hIntraday} workouts={workouts} employers={employers} weekWorkouts={hWeekWorkouts} weekPlanned={hWeekPlanned} weekDates={hWeekDates} selKey={hKey} realTodayKey={todayKey} hDay={hDay} canForward={canForward} showLatest={dayKey(hDay) < dayKey(latestDay)} onPrev={() => setHeuteDay(addDays(hDay, -1))} onNext={() => { if (canForward) setHeuteDay(addDays(hDay, 1)) }} onLatest={() => setHeuteDay(null)} onOpenDaySel={(d: Date) => { if (dayKey(d) <= dayKey(latestDay)) setHeuteDay(startOfDay(d)) }} view={view} colorOf={colorOf} openWorkout={openWorkout} />}
         {seg === 'workouts' && <Workouts workouts={workouts} employers={employers} view={view} colorOf={colorOf} openWorkout={openWorkout} areaFilter={areaFilter} setAreaFilter={setAreaFilter} rangeFilter={rangeFilter} setRangeFilter={setRangeFilter} monday={monday} />}
         {seg === 'schlaf' && <Schlaf sleepRange={sleepRange} scoresRange={scoresRange} />}
         {seg === 'trends' && <Trends />}
@@ -342,20 +341,33 @@ function IntradayCard({ title, emoji, pts, color, tint, sub }: { title: string; 
     </div>
   )
 }
-function Heute({ daily, sleep, scores, intraday, lastWorkout, workouts, weekWorkouts, weekPlanned, weekDates, selKey, realTodayKey, hDay, canForward, showLatest, onPrev, onNext, onLatest, onOpenDaySel, view, colorOf, openWorkout }: any) {
+function Heute({ daily, sleep, scores, intraday, workouts, employers, weekWorkouts, weekPlanned, weekDates, selKey, realTodayKey, hDay, canForward, showLatest, onPrev, onNext, onLatest, onOpenDaySel, view, colorOf, openWorkout }: any) {
   const bbCurve: IntradayPoint[] = intraday?.body_battery_curve ?? []
   const stCurve: IntradayPoint[] = intraday?.stress_curve ?? []
   const dLabel = selKey === realTodayKey ? 'Heute' : `${WD[hDay.getDay()]}, ${hDay.getDate()}. ${MONTHS_SHORT[hDay.getMonth()]}`
   const dayNav = (on: boolean): CSSProperties => ({ width: 36, height: 36, borderRadius: 11, ...GLASS, display: 'grid', placeItems: 'center', cursor: on ? 'pointer' : 'default', opacity: on ? 1 : 0.35, fontSize: 18, fontWeight: 700, color: 'var(--ink2)' })
-  const kpis: ReactNode[] = []
-  if (daily?.bb_high != null) kpis.push(<KpiCard key="bb" kickerText="Body Battery" emoji="🔋" tint={hexA('#22C55E', 0.15)} val={String(daily.bb_high)} unit="/ 100" color="#22C55E" barW={daily.bb_high} sub={daily.bb_low != null ? `Tief ${daily.bb_low} · Hoch ${daily.bb_high}` : 'Ladezustand'} />)
-  if (daily?.stress_avg != null) kpis.push(<KpiCard key="st" kickerText="Stress" emoji="🌀" tint={hexA('#F59E0B', 0.15)} val={String(daily.stress_avg)} unit="/ 100" color="#F59E0B" barW={daily.stress_avg} sub={daily.stress_avg < 30 ? 'Niedrig' : daily.stress_avg < 60 ? 'Moderat' : 'Erhöht'} />)
-  if (sleep?.score != null) kpis.push(<KpiCard key="sl" kickerText="Schlaf-Score" emoji="😴" tint={hexA('#7C5CFF', 0.15)} val={String(sleep.score)} unit="/ 100" color="#7C5CFF" barW={sleep.score} sub={sleep.total_sec ? `${fmtDur(sleep.total_sec / 60)} · ${sleep.score_qualifier ?? ''}` : (sleep.score_qualifier ?? '')} />)
-  if (daily?.steps != null) { const goal = daily.step_goal || 10000; kpis.push(<KpiCard key="sp" kickerText="Schritte" emoji="👣" tint={hexA('#2563EB', 0.15)} val={daily.steps.toLocaleString('de-DE')} unit="" color="#2563EB" barW={(daily.steps / goal) * 100} sub={`Ziel ${goal.toLocaleString('de-DE')} · ${Math.round((daily.steps / goal) * 100)} %`} />) }
 
-  const last: Workout | undefined = lastWorkout
+  // Top-Widgets: HRV · Trainingslast (ACWR) · Stress · Schlaf-Score
+  const acwr = scores?.tr_acwr_percent ?? null
+  const ai = ACWR_INFO(acwr)
+  const hasDay = daily != null || sleep != null || scores != null
+  const kpis: ReactNode[] = [
+    <KpiCard key="hrv" kickerText="HRV" emoji="💓" tint={hexA('#14B8A6', 0.15)} color="#14B8A6" val={sleep?.hrv_overnight_avg != null ? String(Math.round(sleep.hrv_overnight_avg)) : '–'} unit="ms" barW={sleep?.hrv_overnight_avg != null ? Math.min(100, sleep.hrv_overnight_avg) : 0} sub={sleep?.hrv_status ? `Status ${sleep.hrv_status}` : 'Nächtliche HRV'} />,
+    <KpiCard key="load" kickerText="Trainingslast" emoji="📊" tint={hexA(ai.color, 0.15)} color={ai.color} val={scores?.tr_acute_load != null ? String(Math.round(scores.tr_acute_load)) : '–'} unit="" barW={acwr != null ? Math.min(100, acwr) : 0} sub={acwr != null ? `ACWR ${ai.label} · ${Math.round(acwr)} %` : 'Akutlast'} />,
+    <KpiCard key="st" kickerText="Stress" emoji="🌀" tint={hexA('#F59E0B', 0.15)} color="#F59E0B" val={daily?.stress_avg != null ? String(daily.stress_avg) : '–'} unit="/ 100" barW={daily?.stress_avg ?? 0} sub={daily?.stress_avg != null ? (daily.stress_avg < 30 ? 'Niedrig' : daily.stress_avg < 60 ? 'Moderat' : 'Erhöht') : '—'} />,
+    <KpiCard key="sl" kickerText="Schlaf-Score" emoji="😴" tint={hexA('#7C5CFF', 0.15)} color="#7C5CFF" val={sleep?.score != null ? String(sleep.score) : '–'} unit="/ 100" barW={sleep?.score ?? 0} sub={sleep?.total_sec ? `${fmtDur(sleep.total_sec / 60)} · ${sleep.score_qualifier ?? ''}` : (sleep?.score_qualifier ?? '—')} />,
+  ]
+
+  // Letztes Workout relativ zum gewählten Tag, optional nach Bereich gefiltert.
+  const sportEmps: Employer[] = (employers as Employer[]).filter((e) => e.is_sport === 1)
+  const [woArea, setWoArea] = useState<number | 'all'>('all')
+  const last: Workout | undefined = useMemo(() => (workouts as Workout[]).find((w) => dayKey(parseTs(w.start_ts)) <= selKey && (woArea === 'all' || w.employer_id === woArea)), [workouts, selKey, woArea])
   const lv = last ? view(last) : null
+  const woDate = last ? parseTs(last.start_ts) : null
+  const daysBefore = woDate ? Math.round((dateFromKey(selKey).getTime() - startOfDay(woDate).getTime()) / 864e5) : 0
+  const woWhen = daysBefore <= 0 ? 'am gewählten Tag' : daysBefore === 1 ? 'vor 1 Tag' : `vor ${daysBefore} Tagen`
   const r = reco(daily, workouts)
+  const areaPill = (on: boolean): CSSProperties => ({ flex: 'none', padding: '3px 8px', borderRadius: 7, fontSize: 11.5, fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap', color: on ? 'var(--ink)' : 'var(--ink3)', background: on ? 'var(--seg-active, #fff)' : 'transparent' })
 
   return (
     <div>
@@ -367,33 +379,42 @@ function Heute({ daily, sleep, scores, intraday, lastWorkout, workouts, weekWork
         {showLatest && <div onClick={onLatest} title="Zum neuesten Tag" style={{ marginLeft: 4, padding: '8px 14px', borderRadius: 12, ...GLASS, cursor: 'pointer', fontSize: 12.5, fontWeight: 800, color: 'var(--ink2)' }}>Neuester ⏭</div>}
       </div>
 
-      {kpis.length === 0 && <div style={{ ...CARD, borderRadius: 24, padding: '22px 24px', color: 'var(--ink3)', fontWeight: 700 }}>Keine Tagesdaten für {dLabel}.</div>}
-      {kpis.length > 0 && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 18 }}>{kpis}</div>}
+      {!hasDay && <div style={{ ...CARD, borderRadius: 24, padding: '22px 24px', color: 'var(--ink3)', fontWeight: 700, marginBottom: 18 }}>Keine Tagesdaten für {dLabel}.</div>}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 18 }}>{kpis}</div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 18, marginTop: kpis.length > 0 ? 18 : 0 }}>
-        {/* letztes Workout */}
-        {last && lv && (
-          <div onClick={() => openWorkout(last)} style={{ ...CARD, borderRadius: 26, padding: '24px 26px', cursor: 'pointer' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={kicker}>Letztes Workout</div>
-              <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: 5 }}>Deep-Dive
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 18, marginTop: 18 }}>
+        {/* letztes Workout (relativ zum Tag, mit Bereichs-Toggle) */}
+        <div style={{ ...CARD, borderRadius: 26, padding: '24px 26px', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+            <div style={kicker}>Letztes Workout</div>
+            {sportEmps.length > 0 && (
+              <div className="no-scrollbar" onClick={(e) => e.stopPropagation()} style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 9, background: 'var(--track)', overflowX: 'auto', maxWidth: '70%' }}>
+                <div onClick={() => setWoArea('all')} style={areaPill(woArea === 'all')}>Alle</div>
+                {sportEmps.map((e) => <div key={e.id} onClick={() => setWoArea(e.id)} title={e.name} style={areaPill(woArea === e.id)}>{e.icon || e.name}</div>)}
               </div>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 18 }}>
-              <div style={{ width: 56, height: 56, borderRadius: 17, display: 'grid', placeItems: 'center', fontSize: 27, background: hexA(lv.color, 0.16) }}>{lv.emoji}</div>
-              <div>
-                <div style={{ fontSize: 23, fontWeight: 800, letterSpacing: '-0.5px' }}>{lv.name}</div>
-                <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--ink2)', marginTop: 2 }}>{parseTs(last.start_ts).getDate()}. {MONTHS_SHORT[parseTs(last.start_ts).getMonth()]} · {lv.project}</div>
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 30, marginTop: 22 }}>
-              {[['Dauer', fmtDur(lv.durMin)], ['Distanz', kmStr(last.distance_m)], ['Ø-HF', last.avg_hr ? `${Math.round(last.avg_hr)}` : '–']].map(([k, v]) => (
-                <div key={k}><div style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-0.5px', fontVariantNumeric: 'tabular-nums' }}>{v}</div><div style={{ ...kicker, fontSize: 11, marginTop: 3 }}>{k}</div></div>
-              ))}
-            </div>
+            )}
           </div>
-        )}
+          {last && lv ? (
+            <div onClick={() => openWorkout(last)} style={{ cursor: 'pointer' }}>
+              {/* Datum oben – prominent, mit Bezug zum gewählten Tag */}
+              <div style={{ marginTop: 16, fontSize: 12.5, fontWeight: 800, color: 'var(--ink2)', fontVariantNumeric: 'tabular-nums' }}>{WD[woDate!.getDay()]}, {woDate!.getDate()}. {MONTHS_SHORT[woDate!.getMonth()]} {woDate!.getFullYear()} · {woWhen}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 12 }}>
+                <div style={{ width: 56, height: 56, borderRadius: 17, display: 'grid', placeItems: 'center', fontSize: 27, background: hexA(lv.color, 0.16) }}>{lv.emoji}</div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 23, fontWeight: 800, letterSpacing: '-0.5px' }}>{lv.name}</div>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--ink2)', marginTop: 2 }}>{lv.typeName}{lv.project ? ` · ${lv.project}` : ''}</div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 30, marginTop: 22 }}>
+                {[['Dauer', fmtDur(lv.durMin)], ['Distanz', kmStr(last.distance_m)], ['Ø-HF', last.avg_hr ? `${Math.round(last.avg_hr)}` : '–']].map(([k, v]) => (
+                  <div key={k}><div style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-0.5px', fontVariantNumeric: 'tabular-nums' }}>{v}</div><div style={{ ...kicker, fontSize: 11, marginTop: 3 }}>{k}</div></div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div style={{ flex: 1, display: 'grid', placeItems: 'center', minHeight: 120, color: 'var(--ink3)', fontWeight: 700, fontSize: 13.5, textAlign: 'center' }}>Kein Workout {woArea === 'all' ? '' : 'in diesem Bereich '}bis {dLabel}.</div>
+          )}
+        </div>
 
         {/* Empfehlung */}
         <div style={{ ...GLASS, borderRadius: 26, boxShadow: 'var(--card-shadow, 0 22px 48px -30px rgba(17,24,39,0.5))', padding: '24px 26px', display: 'flex', flexDirection: 'column' }}>
@@ -416,14 +437,6 @@ function Heute({ daily, sleep, scores, intraday, lastWorkout, workouts, weekWork
           </div>
         </div>
       </div>
-
-      {/* Body Battery + Stress — Tagesverlauf (9.3.2, an den angezeigten Tag gebunden) */}
-      {(bbCurve.length > 1 || stCurve.length > 1) && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 18, marginTop: 18 }}>
-          {bbCurve.length > 1 && <IntradayCard title="Body Battery – Verlauf" emoji="🔋" pts={bbCurve} color="#22C55E" tint={hexA('#22C55E', 0.15)} sub={`${bbCurve.length} Messpunkte über den Tag`} />}
-          {stCurve.length > 1 && <IntradayCard title="Stress – Verlauf" emoji="🌀" pts={stCurve} color="#F59E0B" tint={hexA('#F59E0B', 0.15)} sub="Skala 0 (ruhig) – 100 (hoch)" />}
-        </div>
-      )}
 
       {/* Wochenleiste */}
       <div style={{ ...CARD, borderRadius: 24, padding: '22px 24px', marginTop: 18 }}>
@@ -469,6 +482,14 @@ function Heute({ daily, sleep, scores, intraday, lastWorkout, workouts, weekWork
           })}
         </div>
       </div>
+
+      {/* Body Battery + Stress — Tagesverlauf (9.3.2, an den angezeigten Tag gebunden) */}
+      {(bbCurve.length > 1 || stCurve.length > 1) && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 18, marginTop: 18 }}>
+          {bbCurve.length > 1 && <IntradayCard title="Body Battery – Verlauf" emoji="🔋" pts={bbCurve} color="#22C55E" tint={hexA('#22C55E', 0.15)} sub={`${bbCurve.length} Messpunkte über den Tag`} />}
+          {stCurve.length > 1 && <IntradayCard title="Stress – Verlauf" emoji="🌀" pts={stCurve} color="#F59E0B" tint={hexA('#F59E0B', 0.15)} sub="Skala 0 (ruhig) – 100 (hoch)" />}
+        </div>
+      )}
     </div>
   )
 }
