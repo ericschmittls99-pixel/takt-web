@@ -31,6 +31,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   bundesland: 'RP',
   birth_date: '',
   sex: '',
+  todo_sound: 'on',
   absence_types: '[]',
   hotkeys: JSON.stringify(DEFAULT_HOTKEYS),
   puls_trends_layout: '',

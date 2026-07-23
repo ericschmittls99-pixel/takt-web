@@ -503,6 +503,17 @@ export default function Verwalten({ theme, onToggleTheme, onBack, onOpenTodos, o
                     <div style={{ position: 'absolute', top: 2, left: theme === 'dark' ? 22 : 2, width: 22, height: 22, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.25)', transition: 'left .2s ease' }} />
                   </div>
                 </div>
+                {(() => { const on = settings.todo_sound !== 'off'; return (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--ink)' }}>To-Do-Sound</div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink3)' }}>Kurzer Bestätigungston beim Abhaken (folgt der System-Lautstärke).</div>
+                  </div>
+                  <div onClick={() => void persistSettings({ todo_sound: on ? 'off' : 'on' })} style={{ width: 46, height: 26, borderRadius: 13, background: on ? 'var(--accent, #22C55E)' : 'var(--track)', position: 'relative', cursor: 'pointer', flex: 'none', transition: 'background .2s ease' }}>
+                    <div style={{ position: 'absolute', top: 2, left: on ? 22 : 2, width: 22, height: 22, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.25)', transition: 'left .2s ease' }} />
+                  </div>
+                </div>
+                ) })()}
               </div>
             </div>
             )}

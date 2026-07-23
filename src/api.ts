@@ -33,6 +33,7 @@ export interface AppSettings {
   bundesland: string
   birth_date: string // YYYY-MM-DD; Alter wird zur Laufzeit berechnet (nie als Zahl speichern)
   sex: string // 'm' | 'w' | '' (leer = geschlechtsneutrale Norm)
+  todo_sound: string // 'on' | 'off' — Bestätigungs-Sound beim To-Do-Abhaken
   absence_types: string // JSON-Array (AbsenceTypeConfig[])
   hotkeys: string // JSON-Objekt (CommandId → Kombi-String, z. B. "mod+k")
   puls_trends_layout: string // JSON { visible: string[], hidden: string[] }

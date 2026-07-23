@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import { createPortal } from 'react-dom'
 import { api, type Employer, type Project, type Todo, type TodoPatch } from '../api'
 import { employerColor } from '../colors'
+import { playCheckChime } from '../sound'
 import InboxPopover from '../components/InboxPopover'
 import type { PageIntent } from '../App'
 
@@ -679,14 +680,14 @@ function TodoRow({
         <div
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => { e.stopPropagation(); onToggleDone() }}
-          style={{ width: 24, height: 24, borderRadius: 8, border: `2px solid ${done ? color : 'var(--ink3)'}`, background: done ? color : 'transparent', display: 'grid', placeItems: 'center', color: '#fff', fontSize: 14, fontWeight: 800, flex: 'none' }}
+          style={{ width: 24, height: 24, borderRadius: 8, border: `2px solid ${done ? color : 'var(--ink3)'}`, background: done ? color : 'transparent', display: 'grid', placeItems: 'center', color: '#fff', fontSize: 14, fontWeight: 800, flex: 'none', transition: 'background .2s ease, border-color .2s ease', animation: done ? 'checkPop .34s ease' : 'none' }}
         >
           {done ? '✓' : ''}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
             {fav && <span style={{ color: '#F59E0B', fontSize: 14, flex: 'none' }}>★</span>}
-            <div style={{ fontSize: 16, fontWeight: 700, color: done ? 'var(--ink3)' : 'var(--ink)', textDecoration: done ? 'line-through' : 'none', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.title}</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: done ? 'var(--ink3)' : 'var(--ink)', textDecoration: done ? 'line-through' : 'none', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', transition: 'color .3s ease' }}>{t.title}</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: 'var(--ink2)' }}>
@@ -805,6 +806,8 @@ export default function Todos({ theme, onBack, onOpenCalendar, onOpenSpotlight, 
   const [filterFocus, setFilterFocus] = useState(false)
   const [groupBy, setGroupBy] = useState<'frist' | 'bereich'>('frist')
   const [filterMenu, setFilterMenu] = useState<'area' | 'due' | null>(null)
+  const soundOn = useRef(true)
+  useEffect(() => { api.getSettings().then((s) => { soundOn.current = s.todo_sound !== 'off' }).catch(() => {}) }, [])
   const [dragTodo, setDragTodo] = useState<Todo | null>(null)
   const [dragInit, setDragInit] = useState<{ x: number; y: number } | null>(null)
   const [dropTarget, setDropTarget] = useState<{ groupKey: string; index: number } | null>(null)
@@ -923,6 +926,7 @@ export default function Todos({ theme, onBack, onOpenCalendar, onOpenSpotlight, 
 
   async function toggleDone(t: Todo) {
     // optimistisch umschalten
+    if (t.done !== 1 && soundOn.current) playCheckChime() // nur beim Abhaken, nicht beim Wieder-Öffnen
     setTodos((prev) => prev.map((x) => (x.id === t.id ? { ...x, done: x.done === 1 ? 0 : 1 } : x)))
     try {
       await api.updateTodo(t.id, { done: t.done !== 1 })

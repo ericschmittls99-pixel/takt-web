@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type SetStateAction } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type KeyboardEvent as ReactKeyboardEvent, type SetStateAction } from 'react'
 import { api, type Absence, type AbsenceType, type AppSettings, type AreaHours, type Employer, type Entry, type PlannedBlock, type PlannedOverride, type Project, type Todo } from '../api'
 import { employerColor } from '../colors'
+import { playCheckChime } from '../sound'
 import { holidayName } from '../holidays'
 import { distributeAbsenceMinutes } from '../absence'
 import { parseQuickTodo } from '../todoParse'
@@ -650,8 +651,10 @@ function AddModal({ employers, projects, plannedBlocks, onClose, onCreated }: Ad
   const [error, setError] = useState<string | null>(null)
   const [planQuery, setPlanQuery] = useState('') // Planblock-Suchtext
   const [planOpen, setPlanOpen] = useState(false) // Planblock-Liste offen
+  const [planActive, setPlanActive] = useState(0) // Tastatur-Fokus in Planblock-Liste
   const [projQuery, setProjQuery] = useState('') // Projekt-Suchtext
   const [projOpen, setProjOpen] = useState(false) // Projekt-Liste offen
+  const [projActive, setProjActive] = useState(0) // Tastatur-Fokus in Projekt-Liste
 
   const colorFor = (id: number) => employers.find((e) => e.id === id)?.color ?? employerColor(id)
   const areaList = employers.filter((e) => e.active === 1 || e.id === employerId)
@@ -659,6 +662,39 @@ function AddModal({ employers, projects, plannedBlocks, onClose, onCreated }: Ad
     () => projects.filter((p) => p.employer_id === employerId && (p.active === 1 || p.id === projectId)),
     [projects, employerId, projectId],
   )
+
+  // Gefilterte Such-Listen (für Render + Tastaturnavigation geteilt).
+  const planItems = useMemo(() => {
+    const ql = planQuery.trim().toLowerCase()
+    return [...plannedBlocks]
+      .sort((a, b) => a.start_min - b.start_min)
+      .map((b) => {
+        const proj = b.project_id != null ? projects.find((p) => p.id === b.project_id) : undefined
+        const emp = employers.find((e) => e.id === b.employer_id)
+        return { b, name: proj?.name ?? emp?.name ?? 'Block', projName: proj?.name ?? '', time: `${pad2(Math.floor(b.start_min / 60))}:${pad2(b.start_min % 60)}–${pad2(Math.floor(b.end_min / 60))}:${pad2(b.end_min % 60)}`, color: emp?.color || employerColor(b.employer_id) }
+      })
+      .filter((it) => !ql || `${it.name} ${it.time}`.toLowerCase().includes(ql))
+  }, [plannedBlocks, projects, employers, planQuery])
+  const projFiltered = useMemo(() => { const ql = projQuery.trim().toLowerCase(); return areaProjects.filter((p) => !ql || p.name.toLowerCase().includes(ql)) }, [areaProjects, projQuery])
+  useEffect(() => { setPlanActive(0) }, [planQuery, planOpen])
+  useEffect(() => { setProjActive(0) }, [projQuery, projOpen])
+
+  function pickPlan(it: (typeof planItems)[number]) { setMode('log'); setEmployerId(it.b.employer_id); setProjectId(it.b.project_id); setProjQuery(it.projName); setStartTime(`${pad2(Math.floor(it.b.start_min / 60))}:${pad2(it.b.start_min % 60)}`); setEndTime(`${pad2(Math.floor(it.b.end_min / 60))}:${pad2(it.b.end_min % 60)}`); setPlanQuery(`${it.name} · ${it.time}`); setPlanOpen(false) }
+  function pickProj(p: Project) { setProjectId(p.id); setProjQuery(p.name); setProjOpen(false) }
+  // Pfeil hoch/runter navigiert (öffnet die Liste falls zu), Enter wählt, Esc schließt — für beide Such-Dropdowns.
+  function listKey<T>(e: ReactKeyboardEvent, open: boolean, setOpen: (v: boolean) => void, items: T[], active: number, setActive: (f: (i: number) => number) => void, pick: (x: T) => void) {
+    if (e.key === 'Escape') { if (open) { e.preventDefault(); setOpen(false) } return }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (items.length === 0) return
+      e.preventDefault()
+      if (!open) { setOpen(true); return }
+      setActive((i) => (e.key === 'ArrowDown' ? (i + 1) % items.length : (i - 1 + items.length) % items.length))
+    } else if (e.key === 'Enter') {
+      if (!open || items.length === 0) return
+      e.preventDefault()
+      pick(items[Math.min(active, items.length - 1)])
+    }
+  }
 
   async function submit() {
     if (employerId === null) {
@@ -712,33 +748,23 @@ function AddModal({ employers, projects, plannedBlocks, onClose, onCreated }: Ad
               value={planQuery}
               onFocus={() => setPlanOpen(true)}
               onChange={(e) => { setPlanQuery(e.target.value); setPlanOpen(true) }}
+              onKeyDown={(e) => listKey(e, planOpen, setPlanOpen, planItems, planActive, setPlanActive, pickPlan)}
               onBlur={() => window.setTimeout(() => setPlanOpen(false), 150)}
               placeholder="Planblock suchen oder wählen …"
               style={{ ...timeField, fontSize: 15 }}
             />
-            {planOpen && (() => {
-              const ql = planQuery.trim().toLowerCase()
-              const items = [...plannedBlocks]
-                .sort((a, b) => a.start_min - b.start_min)
-                .map((b) => {
-                  const proj = b.project_id != null ? projects.find((p) => p.id === b.project_id) : undefined
-                  const emp = employers.find((e) => e.id === b.employer_id)
-                  return { b, name: proj?.name ?? emp?.name ?? 'Block', projName: proj?.name ?? '', time: `${pad2(Math.floor(b.start_min / 60))}:${pad2(b.start_min % 60)}–${pad2(Math.floor(b.end_min / 60))}:${pad2(b.end_min % 60)}`, color: emp?.color || employerColor(b.employer_id) }
-                })
-                .filter((it) => !ql || `${it.name} ${it.time}`.toLowerCase().includes(ql))
-              return (
-                <div className="no-scrollbar" style={{ marginTop: 8, maxHeight: 190, overflowY: 'auto', borderRadius: 14, border: '1px solid var(--border)', background: 'var(--glass)', display: 'flex', flexDirection: 'column', gap: 2, padding: 6 }}>
-                  {items.length === 0 && <div style={{ padding: '8px 10px', fontSize: 13, fontWeight: 600, color: 'var(--ink3)' }}>Kein passender Planblock</div>}
-                  {items.map((it, i) => (
-                    <div key={i} onMouseDown={(e) => { e.preventDefault(); setMode('log'); setEmployerId(it.b.employer_id); setProjectId(it.b.project_id); setProjQuery(it.projName); setStartTime(`${pad2(Math.floor(it.b.start_min / 60))}:${pad2(it.b.start_min % 60)}`); setEndTime(`${pad2(Math.floor(it.b.end_min / 60))}:${pad2(it.b.end_min % 60)}`); setPlanQuery(`${it.name} · ${it.time}`); setPlanOpen(false) }} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px', borderRadius: 10, cursor: 'pointer' }}>
-                      <div style={{ width: 9, height: 9, borderRadius: 3, background: it.color, flex: 'none' }} />
-                      <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 700, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.name}</div>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink3)', fontVariantNumeric: 'tabular-nums' }}>{it.time}</div>
-                    </div>
-                  ))}
-                </div>
-              )
-            })()}
+            {planOpen && (
+              <div className="no-scrollbar" style={{ marginTop: 8, maxHeight: 190, overflowY: 'auto', borderRadius: 14, border: '1px solid var(--border)', background: 'var(--glass)', display: 'flex', flexDirection: 'column', gap: 2, padding: 6 }}>
+                {planItems.length === 0 && <div style={{ padding: '8px 10px', fontSize: 13, fontWeight: 600, color: 'var(--ink3)' }}>Kein passender Planblock</div>}
+                {planItems.map((it, i) => (
+                  <div key={i} onMouseEnter={() => setPlanActive(i)} onMouseDown={(e) => { e.preventDefault(); pickPlan(it) }} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px', borderRadius: 10, cursor: 'pointer', background: i === planActive ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'transparent' }}>
+                    <div style={{ width: 9, height: 9, borderRadius: 3, background: it.color, flex: 'none' }} />
+                    <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 700, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.name}</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink3)', fontVariantNumeric: 'tabular-nums' }}>{it.time}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -767,29 +793,25 @@ function AddModal({ employers, projects, plannedBlocks, onClose, onCreated }: Ad
               value={projQuery}
               onFocus={() => setProjOpen(true)}
               onChange={(e) => { setProjQuery(e.target.value); setProjectId(null); setProjOpen(true) }}
+              onKeyDown={(e) => listKey(e, projOpen, setProjOpen, projFiltered, projActive, setProjActive, pickProj)}
               onBlur={() => window.setTimeout(() => setProjOpen(false), 150)}
               placeholder="Projekt suchen oder wählen …"
               style={{ ...timeField, fontSize: 15 }}
             />
-            {projOpen && (() => {
-              const ql = projQuery.trim().toLowerCase()
-              const filtered = areaProjects.filter((p) => !ql || p.name.toLowerCase().includes(ql))
-              return (
-                <div className="no-scrollbar" style={{ marginTop: 8, maxHeight: 190, overflowY: 'auto', borderRadius: 14, border: '1px solid var(--border)', background: 'var(--glass)', display: 'flex', flexDirection: 'column', gap: 2, padding: 6 }}>
-                  {filtered.length === 0 && <div style={{ padding: '8px 10px', fontSize: 13, fontWeight: 600, color: 'var(--ink3)' }}>Kein passendes Projekt</div>}
-                  {filtered.map((p) => {
-                    const color = colorFor(p.employer_id)
-                    const on = p.id === projectId
-                    return (
-                      <div key={p.id} onMouseDown={(e) => { e.preventDefault(); setProjectId(p.id); setProjQuery(p.name); setProjOpen(false) }} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px', borderRadius: 10, cursor: 'pointer', background: on ? `color-mix(in srgb, ${color} 16%, transparent)` : 'transparent' }}>
-                        <div style={{ width: 9, height: 9, borderRadius: 3, background: color, flex: 'none' }} />
-                        <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 700, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
-                      </div>
-                    )
-                  })}
-                </div>
-              )
-            })()}
+            {projOpen && (
+              <div className="no-scrollbar" style={{ marginTop: 8, maxHeight: 190, overflowY: 'auto', borderRadius: 14, border: '1px solid var(--border)', background: 'var(--glass)', display: 'flex', flexDirection: 'column', gap: 2, padding: 6 }}>
+                {projFiltered.length === 0 && <div style={{ padding: '8px 10px', fontSize: 13, fontWeight: 600, color: 'var(--ink3)' }}>Kein passendes Projekt</div>}
+                {projFiltered.map((p, i) => {
+                  const color = colorFor(p.employer_id)
+                  return (
+                    <div key={p.id} onMouseEnter={() => setProjActive(i)} onMouseDown={(e) => { e.preventDefault(); pickProj(p) }} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px', borderRadius: 10, cursor: 'pointer', background: i === projActive ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : (p.id === projectId ? `color-mix(in srgb, ${color} 16%, transparent)` : 'transparent') }}>
+                      <div style={{ width: 9, height: 9, borderRadius: 3, background: color, flex: 'none' }} />
+                      <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 700, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         )}
 
@@ -967,6 +989,7 @@ export default function MeinTag({ theme, onOpenTodos, onOpenCalendar, onOpenAusw
   }, [todos, now])
 
   async function toggleTodo(t: Todo) {
+    if (t.done !== 1 && settings.todo_sound !== 'off') playCheckChime()
     setTodos((prev) => prev.map((x) => (x.id === t.id ? { ...x, done: x.done === 1 ? 0 : 1 } : x)))
     try {
       await api.updateTodo(t.id, { done: t.done !== 1 })
@@ -1376,9 +1399,11 @@ export default function MeinTag({ theme, onOpenTodos, onOpenCalendar, onOpenAusw
 
           {/* date navigator */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '9px 18px', borderRadius: 16, ...GLASS }}>
-            <div onClick={() => setSelectedDay((d) => addDays(d, -1))} style={{ color: 'var(--ink3)', fontSize: 16, fontWeight: 700, cursor: 'pointer', padding: '0 4px' }}>
+            {(() => { const atStichtag = dayKey(selectedDay) <= settings.start_date; return (
+            <div onClick={atStichtag ? undefined : () => setSelectedDay((d) => addDays(d, -1))} title={atStichtag ? 'Stichtag erreicht — kein früherer Tag' : 'Vorheriger Tag'} style={{ color: 'var(--ink3)', fontSize: 16, fontWeight: 700, cursor: atStichtag ? 'default' : 'pointer', opacity: atStichtag ? 0.3 : 1, padding: '0 4px' }}>
               ‹
             </div>
+            ) })()}
             <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--ink)', minWidth: 96, textAlign: 'center' }}>{datePill}</div>
             <div
               onClick={() => {

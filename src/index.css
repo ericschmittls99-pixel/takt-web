@@ -99,3 +99,16 @@ body {
     transform: rotate(360deg);
   }
 }
+
+/* To-Do abhaken: kurzer, dezenter Häkchen-Pop */
+@keyframes checkPop {
+  0% {
+    transform: scale(0.7);
+  }
+  55% {
+    transform: scale(1.18);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
