@@ -23,6 +23,16 @@ const startOfDay = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0);
 const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x }
 const dayKey = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 const dateFromKey = (k: string) => { const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d) }
+// Alter IMMER zur Laufzeit aus Geburtsdatum berechnen (nie speichern), YYYY-MM-DD.
+const ageFromBirthdate = (birth: string): number | null => {
+  if (!birth) return null
+  const b = dateFromKey(birth); if (Number.isNaN(b.getTime())) return null
+  const now = new Date()
+  let a = now.getFullYear() - b.getFullYear()
+  const m = now.getMonth() - b.getMonth()
+  if (m < 0 || (m === 0 && now.getDate() < b.getDate())) a--
+  return a >= 0 && a < 130 ? a : null
+}
 const parseTs = (ts: string) => new Date(ts.includes('T') ? ts : ts.replace(' ', 'T'))
 function fmtDur(min: number) { if (min < 60) return `${Math.round(min)} min`; return `${Math.floor(min / 60)}h ${pad(Math.round(min % 60))}` }
 function kmStr(m: number | null) { return m ? (m / 1000).toFixed(1).replace('.', ',') + ' km' : '–' }
@@ -257,7 +267,7 @@ export default function Puls({ theme, onBack, onOpenTodos, onOpenCalendar, onOpe
 
         {seg === 'heute' && <Heute daily={hDaily} sleep={hSleep} scores={hScores} intraday={hIntraday} workouts={workouts} employers={employers} weekWorkouts={hWeekWorkouts} weekPlanned={hWeekPlanned} weekDates={hWeekDates} selKey={hKey} realTodayKey={todayKey} hDay={hDay} canForward={canForward} showLatest={dayKey(hDay) < dayKey(latestDay)} onPrev={() => setHeuteDay(addDays(hDay, -1))} onNext={() => { if (canForward) setHeuteDay(addDays(hDay, 1)) }} onLatest={() => setHeuteDay(null)} onOpenDaySel={(d: Date) => { if (dayKey(d) <= dayKey(latestDay)) setHeuteDay(startOfDay(d)) }} view={view} colorOf={colorOf} openWorkout={openWorkout} />}
         {seg === 'workouts' && <Workouts workouts={workouts} employers={employers} view={view} colorOf={colorOf} openWorkout={openWorkout} areaFilter={areaFilter} setAreaFilter={setAreaFilter} rangeFilter={rangeFilter} setRangeFilter={setRangeFilter} monday={monday} />}
-        {seg === 'schlaf' && <Schlaf sleepRange={sleepRange} scoresRange={scoresRange} />}
+        {seg === 'schlaf' && <Schlaf sleepRange={sleepRange} />}
         {seg === 'trends' && <Trends />}
       </div>
 
@@ -622,19 +632,33 @@ const PHASES = [
 const phaseColor = (lvl: number) => PHASES.find((p) => p.lvl === Math.round(lvl))?.color ?? '#94A3B8'
 const segSec = (s: { startGMT: string; endGMT: string }) => Math.max(0, (new Date(s.endGMT.slice(0, 19)).getTime() - new Date(s.startGMT.slice(0, 19)).getTime()) / 1000)
 const NEED_FB: Record<string, string> = { INCREASED: 'erhöht', DECREASED: 'verringert', NO_CHANGE_NO_ADJUSTMENTS: 'unverändert', NO_CHANGE: 'unverändert' }
+// Schlaf-Score-Qualität (8.2): Farbe + Kurzlabel.
+const sleepQ = (s: number | null): { c: string; label: string } => s == null ? { c: 'var(--ink3)', label: '—' } : s >= 80 ? { c: '#22C55E', label: 'gut' } : s >= 60 ? { c: '#F59E0B', label: 'mittel' } : { c: '#EF4444', label: 'schlecht' }
+// Phasen-Einordnung (8.3): kuratierte, formelfreie Richtwerte — grobe Orientierung, keine Diagnose.
+function phaseEval(key: string, pct: number): { t: string; c: string } {
+  if (key === 'deep_sec') return pct < 13 ? { t: 'unter dem Richtwert (13–23 %)', c: '#F59E0B' } : pct <= 23 ? { t: 'im Richtbereich (13–23 %)', c: '#22C55E' } : { t: 'über dem Richtwert (13–23 %)', c: 'var(--ink2)' }
+  if (key === 'rem_sec') return pct < 20 ? { t: 'unter dem Richtwert (20–25 %)', c: '#F59E0B' } : pct <= 25 ? { t: 'im Richtbereich (20–25 %)', c: '#22C55E' } : { t: 'über dem Richtwert (20–25 %)', c: 'var(--ink2)' }
+  if (key === 'awake_sec') return pct < 10 ? { t: 'gering — gut', c: '#22C55E' } : pct <= 20 ? { t: 'etwas erhöht', c: '#F59E0B' } : { t: 'hoch (unruhige Nacht)', c: '#EF4444' }
+  return { t: 'Grundgerüst des Schlafs — kein fester Zielwert', c: 'var(--ink3)' }
+}
 
-function Schlaf({ sleepRange, scoresRange }: { sleepRange: GarminSleep[]; scoresRange: GarminScores[] }) {
+function Schlaf({ sleepRange }: { sleepRange: GarminSleep[] }) {
   const nights = useMemo(() => sleepRange.filter((s) => s.total_sec != null || s.score != null), [sleepRange]) // Lücken raus
   const [selDate, setSelDate] = useState<string | null>(null)
   const [period, setPeriod] = useState<'week' | 'month'>('week')
-  const scoresByDate = useMemo(() => new Map(scoresRange.map((s) => [s.calendar_date, s])), [scoresRange])
+  const [phaseOpen, setPhaseOpen] = useState(false)
+  // Nächte-Leiste (8.1): älteste links, neueste rechts → beim Laden ans rechte Ende scrollen.
+  const stripRef = useRef<HTMLDivElement>(null)
+  useEffect(() => { const el = stripRef.current; if (el) el.scrollLeft = el.scrollWidth }, [nights.length])
   if (nights.length === 0) return <div style={{ ...CARD, borderRadius: 24, padding: '48px 26px', textAlign: 'center', color: 'var(--ink3)', fontWeight: 700 }}>Noch keine Schlafdaten.</div>
+
+  const strip = [...nights].slice(0, 30).reverse() // 30 jüngste, chronologisch aufsteigend (alt → neu)
 
   const sel = nights.find((n) => n.calendar_date === selDate) ?? nights[0]
   const curves = sel.curves && typeof sel.curves === 'object' ? sel.curves : null
   const levels = curves?.levels ?? []
   const totalLevels = levels.reduce((a, s) => a + segSec(s), 0) || 1
-  const readiness = scoresByDate.get(sel.calendar_date)
+  const phaseTot = PHASES.reduce((a, p) => a + (sel[p.sec] ?? 0), 0) || 1 // Nenner für Phasen-Prozente (8.3)
   const selD = new Date(`${sel.calendar_date}T00:00:00`)
 
   const kpis: [string, string, string][] = []
@@ -648,7 +672,6 @@ function Schlaf({ sleepRange, scoresRange }: { sleepRange: GarminSleep[]; scores
   if (sel.avg_spo2 != null) kpis.push(['Ø SpO₂', `${sel.avg_spo2}`, '%'])
   if (sel.avg_respiration != null) kpis.push(['Ø Atemfrequenz', `${sel.avg_respiration}`, '/min'])
   if (sel.restless_moments != null) kpis.push(['Unruhe', String(sel.restless_moments), 'Momente'])
-  if (readiness?.training_readiness_score != null) kpis.push(['Readiness', String(readiness.training_readiness_score), readiness.tr_level ?? ''])
 
   const periodNights = period === 'week' ? nights.slice(0, 7) : nights.slice(0, 30)
   const chrono = [...periodNights].reverse()
@@ -663,15 +686,21 @@ function Schlaf({ sleepRange, scoresRange }: { sleepRange: GarminSleep[]; scores
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      {/* Nacht-Auswahl */}
-      <div className="no-scrollbar" style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 2 }}>
-        {nights.slice(0, 14).map((n) => {
+      {/* Nächte-Leiste (8.1/8.2): alt links → neu rechts, Score nach Qualität gefärbt + Trend vs. Vornacht */}
+      <div ref={stripRef} className="no-scrollbar" style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 2 }}>
+        {strip.map((n, i) => {
           const on = n.calendar_date === sel.calendar_date
           const d = new Date(`${n.calendar_date}T00:00:00`)
+          const q = sleepQ(n.score)
+          const prev = strip[i - 1]?.score
+          const trend = n.score != null && prev != null ? (n.score > prev ? 'up' : n.score < prev ? 'down' : 'flat') : null
           return (
-            <div key={n.calendar_date} onClick={() => setSelDate(n.calendar_date)} style={{ flex: 'none', minWidth: 70, textAlign: 'center', padding: '10px 12px', borderRadius: 14, cursor: 'pointer', background: on ? 'color-mix(in srgb, var(--accent) 12%, var(--track))' : 'var(--track)', border: on ? '1.5px solid color-mix(in srgb, var(--accent) 45%, transparent)' : '1px solid var(--hair)' }}>
+            <div key={n.calendar_date} onClick={() => setSelDate(n.calendar_date)} title={`${d.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })}${n.score != null ? ` · Score ${n.score} (${q.label})` : ''}`} style={{ flex: 'none', minWidth: 72, textAlign: 'center', padding: '10px 12px', borderRadius: 14, cursor: 'pointer', background: on ? 'color-mix(in srgb, var(--accent) 12%, var(--track))' : 'var(--track)', border: on ? '1.5px solid color-mix(in srgb, var(--accent) 45%, transparent)' : '1px solid var(--hair)' }}>
               <div style={{ fontSize: 12, fontWeight: 800, color: on ? 'var(--accent)' : 'var(--ink2)' }}>{WD[d.getDay()]} {d.getDate()}.</div>
-              <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums', marginTop: 3 }}>{n.score ?? '–'}</div>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 3, marginTop: 3 }}>
+                <div style={{ fontSize: 18, fontWeight: 800, color: q.c, fontVariantNumeric: 'tabular-nums' }}>{n.score ?? (n.total_sec != null ? fmtDurSec(n.total_sec) : '–')}</div>
+                {trend && <span style={{ fontSize: 9.5, fontWeight: 900, color: trend === 'up' ? '#22C55E' : trend === 'down' ? '#EF4444' : 'var(--ink3)' }}>{trend === 'up' ? '▲' : trend === 'down' ? '▼' : '▬'}</span>}
+              </div>
             </div>
           )
         })}
@@ -698,6 +727,27 @@ function Schlaf({ sleepRange, scoresRange }: { sleepRange: GarminSleep[]; scores
                   <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{v != null ? fmtDurSec(v) : '–'}</div>
                 </div>
               ) })}
+            </div>
+
+            {/* Phasen-Bewertung (8.3): Akkordeon mit Richtwert-Einordnung */}
+            <div style={{ marginTop: 14 }}>
+              <div onClick={() => setPhaseOpen((o) => !o)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 12px', borderRadius: 10, cursor: 'pointer', fontSize: 12, fontWeight: 800, color: 'var(--ink2)', background: 'var(--track)' }}>
+                Phasen-Bewertung
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" style={{ transform: phaseOpen ? 'rotate(180deg)' : 'none', transition: 'transform .18s ease' }}><path d="M6 9l6 6 6-6" /></svg>
+              </div>
+              {phaseOpen && (
+                <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {PHASES.map((p) => { const v = sel[p.sec]; if (v == null) return null; const pct = (v / phaseTot) * 100; const ev = phaseEval(p.sec, pct); return (
+                    <div key={p.lvl} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                      <div style={{ width: 9, height: 9, borderRadius: 3, background: p.color, flex: 'none' }} />
+                      <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--ink)', minWidth: 46 }}>{p.name}</div>
+                      <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--ink2)', fontVariantNumeric: 'tabular-nums', minWidth: 94 }}>{fmtDurSec(v)} · {Math.round(pct)} %</div>
+                      <div style={{ fontSize: 11.5, fontWeight: 700, color: ev.c }}>{ev.t}</div>
+                    </div>
+                  ) })}
+                  <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--ink3)', marginTop: 2, lineHeight: 1.4 }}>Grobe Orientierung, keine medizinische Diagnose. Prozente bezogen auf die gesamte erfasste Nacht.</div>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -798,7 +848,7 @@ function Schlaf({ sleepRange, scoresRange }: { sleepRange: GarminSleep[]; scores
 // ─────────────────────────────────────────────────────────────────────────────
 // Trends-Widget-Dashboard (WP4d-2: echte Datenbindung + Zoom-Modal)
 type WType = 'sparkline' | 'tagesverlauf' | 'score-gauge' | 'kennzahl-ziel'
-type Src = 'daily' | 'sleep' | 'scores'
+type Src = 'daily' | 'sleep' | 'scores' | 'health'
 interface WidgetDef {
   id: string; name: string; icon: string; type: WType; group: 'A' | 'B'; defaultVisible: boolean
   src: Src
@@ -807,7 +857,7 @@ interface WidgetDef {
   gaugeMax?: number
   target?: (r: Record<string, unknown>) => number | null
   fmt?: (v: number) => string
-  special?: 'vo2max' | 'load' | 'race' | 'status'
+  special?: 'vo2max' | 'load' | 'race' | 'status' | 'weight'
   intradayKey?: 'body_battery_curve' | 'stress_curve'  // Zoom-Modal zeigt zusätzlich den 3-Min-Tagesverlauf
 }
 const numN = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
@@ -844,6 +894,7 @@ const WIDGETS: WidgetDef[] = [
   { id: 'intensity', name: 'Intensitätsminuten', icon: '⚡', type: 'kennzahl-ziel', group: 'A', defaultVisible: false, src: 'daily', get: (r) => (numN(r.intensity_moderate_min) ?? 0) + (numN(r.intensity_vigorous_min) ?? 0), target: () => 150, goodDir: 'up' },
   { id: 'calories', name: 'Aktive Kalorien', icon: '🔥', type: 'sparkline', group: 'A', defaultVisible: false, src: 'daily', get: (r) => numN(r.calories_active), unit: 'kcal', goodDir: 'up' },
   { id: 'floors', name: 'Etagen', icon: '🪜', type: 'sparkline', group: 'A', defaultVisible: false, src: 'daily', get: (r) => numN(r.floors_ascended), goodDir: 'up' },
+  { id: 'weight', name: 'Gewicht', icon: '⚖️', type: 'sparkline', group: 'A', defaultVisible: false, src: 'health', get: (r) => { const g = numN(r.weight_g); return g != null ? g / 1000 : null }, unit: 'kg', decimals: 1, goodDir: 'down', special: 'weight' },
   // Gruppe B — garmin_scores
   { id: 'readiness', name: 'Training Readiness', icon: '✅', type: 'score-gauge', group: 'B', defaultVisible: true, src: 'scores', get: (r) => numN(r.training_readiness_score), gaugeMax: 100, goodDir: 'up' },
   { id: 'vo2max', name: 'VO2max', icon: '📈', type: 'sparkline', group: 'B', defaultVisible: true, src: 'scores', get: (r) => numN(r.vo2max), goodDir: 'up', special: 'vo2max' },
@@ -921,6 +972,12 @@ function WidgetBody({ w, maps, color, dist, onDist }: { w: WidgetDef; maps: Maps
   const getFn = w.special === 'race' ? (r: Record<string, unknown>) => numN(r[RACE_COL[dist]]) : undefined
   const vals = buildSeries(w, maps, 90, getFn)
   const st = statsOf(vals)
+  if (!st && w.special === 'weight') return (
+    <div style={{ marginTop: 10 }}>
+      <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--ink2)' }}>Noch keine Gewichtsdaten</div>
+      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink3)', marginTop: 5, lineHeight: 1.45 }}>Sobald du dein Gewicht in Garmin Connect pflegst, füllt sich der Verlauf hier automatisch.</div>
+    </div>
+  )
   if (!st) return <div style={{ marginTop: 10, fontSize: 12.5, fontWeight: 700, color: 'var(--ink3)' }}>Keine Daten im Zeitraum.</div>
 
   if (w.special === 'status') {
@@ -1048,7 +1105,198 @@ function ZoomChart({ vals, period, bars, color, fmtValue, fmtTick, showDots }: {
   )
 }
 
-function ZoomModal({ w, maps, intraday, color, dist, onDist, onClose }: { w: WidgetDef; maps: Maps; intraday?: Map<string, GarminIntraday>; color: string; dist: RaceDist; onDist: (d: RaceDist) => void; onClose: () => void }) {
+// ── KPI-Erklärungen (Welle 4-2): kuratierte Texte, KEINE aus Daten berechneten Formeln. ──
+// Garmins/Firstbeats Algorithmen sind proprietär — hier nur Einordnung, keine exakte Formel.
+type Sex = 'm' | 'w'
+type ClsCtx = { cur: number | null; row: Record<string, unknown> | null; avg30: number | null; age: number | null; sex: Sex | null }
+interface Explain { bubble: string; accordion: string; classify?: (c: ClsCtx) => { text: string; color: string } | null; staticNote?: string }
+const C_GREEN = '#22C55E', C_AMBER = '#F59E0B', C_RED = '#EF4444', C_NEUTRAL = 'var(--ink2)'
+
+// ── Altersnormierte Norm-Tabellen (Welle 4-2c) — statische Richtwerte, KEINE berechneten Formeln. ──
+// Alter wird zur Laufzeit aus Geburtsdatum berechnet; je Altersgruppe (Dekade) + Geschlecht eine Zeile.
+// Jede Zeile = 5 aufsteigende Schwellen → 6 Kategorien.
+const NORM_GROUP = (age: number): number => Math.min(70, Math.max(20, Math.floor(age / 10) * 10))
+const NORM_GROUP_LABEL = (gk: number): string => (gk >= 70 ? '70+' : `${gk}–${gk + 9}`)
+// Index 0..5 anhand aufsteigender Schwellen (v >= Schwelle ⇒ nächste Kategorie).
+const NORM_BIN = (v: number, thr: number[]): number => { let i = 0; while (i < thr.length && v >= thr[i]) i++; return i }
+// Bei fehlendem Geschlecht: geschlechtsneutrale Norm = Mittel aus m/w.
+function normRow(table: Record<Sex, Record<number, number[]>>, sex: Sex | null, gk: number): number[] {
+  if (sex) return table[sex][gk]
+  const m = table.m[gk], w = table.w[gk]
+  return m.map((x, i) => Math.round((x + w[i]) / 2))
+}
+// VO2max (ml/kg/min), Kategorien niedrig→hoch (höher = besser). Angelehnt an Cooper/ACSM-Perzentile.
+const VO2MAX_NORM: Record<Sex, Record<number, number[]>> = {
+  m: { 20: [32, 38, 44, 51, 57], 30: [31, 36, 42, 48, 54], 40: [29, 34, 40, 45, 52], 50: [27, 32, 36, 43, 49], 60: [25, 29, 34, 41, 47], 70: [23, 27, 32, 38, 44] },
+  w: { 20: [28, 34, 39, 45, 51], 30: [27, 32, 37, 43, 48], 40: [25, 29, 34, 40, 46], 50: [22, 26, 31, 36, 42], 60: [20, 24, 28, 34, 40], 70: [18, 22, 26, 32, 38] },
+}
+const VO2MAX_LABELS = ['schwach', 'unterdurchschnittlich', 'durchschnittlich', 'gut', 'exzellent', 'überragend']
+const VO2MAX_COLORS = [C_RED, C_AMBER, C_NEUTRAL, C_GREEN, C_GREEN, C_GREEN]
+// Ruhepuls (bpm), Kategorien niedrig→hoch (niedriger Puls = besser). Altersabhängige Richtwerte.
+const RHR_NORM: Record<Sex, Record<number, number[]>> = {
+  m: { 20: [56, 62, 66, 74, 82], 30: [56, 62, 66, 75, 83], 40: [57, 63, 67, 76, 84], 50: [58, 64, 68, 77, 84], 60: [57, 62, 67, 76, 84], 70: [56, 62, 66, 74, 82] },
+  w: { 20: [61, 66, 70, 79, 85], 30: [61, 66, 70, 78, 84], 40: [61, 66, 70, 79, 85], 50: [62, 67, 71, 80, 85], 60: [61, 66, 70, 78, 84], 70: [61, 66, 70, 77, 84] },
+}
+const RHR_LABELS = ['Athlet', 'exzellent', 'gut', 'durchschnittlich', 'unterdurchschnittlich', 'schwach']
+const RHR_COLORS = [C_GREEN, C_GREEN, C_GREEN, C_NEUTRAL, C_AMBER, C_RED]
+const EXPLAIN: Record<string, Explain> = {
+  hrv: {
+    bubble: 'Herzratenvariabilität — die Schwankung zwischen deinen Herzschlägen in der Nacht. Höher ist meist besser; sie spiegelt Erholung und Belastbarkeit wider.',
+    accordion: 'HRV misst, wie variabel die Abstände zwischen Herzschlägen sind. Ein gut erholtes, ausgeglichenes Nervensystem erzeugt höhere Variabilität, Stress und Ermüdung senken sie. HRV ist stark individuell — der absolute Wert sagt weniger als dein persönlicher Trend. Achte auf Abweichungen von deinem eigenen Normalbereich, nicht auf Vergleiche mit anderen.',
+    classify: ({ cur, avg30 }) => {
+      if (cur == null || avg30 == null) return null
+      if (cur < avg30 * 0.95) return { text: `Dein aktueller Wert (${Math.round(cur)} ms) liegt unter deinem 30-Tage-Schnitt (${avg30} ms) — mögliche Belastung oder Ermüdung.`, color: C_AMBER }
+      if (cur > avg30 * 1.05) return { text: `Dein aktueller Wert (${Math.round(cur)} ms) liegt über deinem 30-Tage-Schnitt (${avg30} ms) — gut erholt.`, color: C_GREEN }
+      return { text: `Dein aktueller Wert (${Math.round(cur)} ms) liegt im Bereich deines 30-Tage-Schnitts (${avg30} ms) — normal.`, color: C_GREEN }
+    },
+  },
+  load: {
+    bubble: 'Akute Trainingslast im Verhältnis zur chronischen (ACWR) — zeigt, ob dein aktuelles Training zu deiner jüngsten Gewöhnung passt.',
+    accordion: 'ACWR (Acute:Chronic Workload Ratio) setzt deine Last der letzten ~7 Tage ins Verhältnis zu den letzten ~28. Es ist ein etablierter Indikator dafür, ob du dich in einem tragfähigen Belastungsbereich bewegst oder zu schnell steigerst. Als Orientierung (keine medizinische Aussage): unter 0,8 = geringe Last / Detraining möglich; 0,8–1,3 = optimaler Bereich; 1,3–1,5 = erhöht; über 1,5 = hoch, steigendes Überlastungsrisiko.',
+    classify: ({ row }) => {
+      const p = numN(row?.tr_acwr_percent); if (p == null) return null
+      const info = ACWR_INFO(p)
+      const label = ({ wenig: 'geringe Last / Detraining möglich', optimal: 'optimaler Bereich', erhöht: 'erhöht', hoch: 'hoch — steigendes Überlastungsrisiko' } as Record<string, string>)[info.label] ?? info.label
+      return { text: `Dein aktueller ACWR liegt bei ${(p / 100).toFixed(2).replace('.', ',')} — ${label}.`, color: info.color }
+    },
+  },
+  stress: {
+    bubble: 'Garmins Stress-Wert aus der Herzratenvariabilität — je höher, desto mehr Belastung; niedrige Werte bedeuten Erholung/Ruhe.',
+    accordion: 'Der Stress-Wert leitet sich aus der HRV über den Tag ab. Er unterscheidet nicht zwischen körperlicher und mentaler Belastung — auch Training, Kaffee oder wenig Schlaf treiben ihn hoch. Bereiche: 0–25 = Ruhe; 26–50 = niedrig; 51–75 = mittel; 76–100 = hoch. Dauerhaft hohe Werte über den Tag deuten auf fehlende Erholungsphasen hin.',
+    classify: ({ cur }) => {
+      if (cur == null) return null
+      const v = Math.round(cur)
+      const [b, c] = v <= 25 ? ['Ruhe', C_GREEN] : v <= 50 ? ['niedrig', C_GREEN] : v <= 75 ? ['mittel', C_AMBER] : ['hoch', C_RED]
+      return { text: `Dein Tagesschnitt (${v}) liegt im Bereich „${b}".`, color: c }
+    },
+  },
+  sleep_score: {
+    bubble: 'Gesamtbewertung deiner Nacht aus Dauer, Tiefschlaf/REM, Erholung und Unruhe. Höher ist besser.',
+    accordion: 'Der Score fasst Schlafdauer, Anteil von Tief- und REM-Schlaf, nächtliche HRV/Erholung und Unruhe zu einem Wert zusammen. Bereiche: 90–100 = ausgezeichnet; 80–89 = gut; 60–79 = mittelmäßig; unter 60 = schlecht. Ein einzelner niedriger Wert ist normal — der Wochentrend zählt.',
+    classify: ({ cur }) => {
+      if (cur == null) return null
+      const v = Math.round(cur)
+      const [b, c] = v >= 90 ? ['ausgezeichnet', C_GREEN] : v >= 80 ? ['gut', C_GREEN] : v >= 60 ? ['mittelmäßig', C_AMBER] : ['schlecht', C_RED]
+      return { text: `Dein Score (${v}) liegt im Bereich „${b}".`, color: c }
+    },
+  },
+  body_battery: {
+    bubble: 'Deine Energiereserve — lädt bei Erholung und Schlaf, entleert sich bei Stress und Aktivität. Ein Tank für den Tag.',
+    accordion: 'Body Battery kombiniert HRV, Stress, Schlaf und Aktivität zu einem Energiewert. Er steigt bei Ruhe und gutem Schlaf, fällt bei Belastung. Im Tagesverlauf startest du morgens meist hoch (über Nacht geladen) und baust über den Tag ab. Bereiche: 75–100 = hoch; 50–74 = mittel; 25–49 = niedrig; unter 25 = erschöpft. Wie hoch du morgens startest, ist ein guter Erholungsindikator.',
+    classify: ({ cur }) => {
+      if (cur == null) return null
+      const v = Math.round(cur)
+      const [b, c] = v >= 75 ? ['hoch', C_GREEN] : v >= 50 ? ['mittel', C_GREEN] : v >= 25 ? ['niedrig', C_AMBER] : ['erschöpft', C_RED]
+      return { text: `Dein Tageshöchstwert (${v}) liegt im Bereich „${b}". Wie hoch du morgens startest, ist ein guter Erholungsindikator.`, color: c }
+    },
+  },
+  vo2max: {
+    bubble: 'Schätzung deiner maximalen Sauerstoffaufnahme — der wichtigste Einzelwert für aerobe Fitness. Höher = ausdauernder.',
+    accordion: 'VO2max schätzt, wie viel Sauerstoff dein Körper unter maximaler Belastung verwerten kann, aus Herzfrequenz und Tempo beim Laufen/Radfahren. Er verbessert sich langsam über Wochen gezielten Trainings. Absolutwerte hängen stark von Alter und Geschlecht ab — dein Trend über Monate ist aussagekräftiger als der Einzelwert. Zwischen Messtagen wird der letzte Wert fortgeschrieben (siehe Kennzeichnung im Graph).',
+    staticNote: 'Für die altersnormierte Einordnung Geburtsdatum in den Einstellungen hinterlegen. Ansonsten zählt vor allem dein eigener Trend über Monate.',
+    classify: ({ cur, age, sex }) => {
+      if (cur == null || age == null) return null
+      const gk = NORM_GROUP(age)
+      const idx = NORM_BIN(cur, normRow(VO2MAX_NORM, sex, gk))
+      const sn = sex ? '' : ' · geschlechtsneutral'
+      return { text: `VO2max ${Math.round(cur)} — für dein Alter (Gruppe ${NORM_GROUP_LABEL(gk)}${sn}): ${VO2MAX_LABELS[idx]}.`, color: VO2MAX_COLORS[idx] }
+    },
+  },
+  resting_hr: {
+    bubble: 'Deine Herzfrequenz in völliger Ruhe (meist nachts/morgens gemessen). Ein niedrigerer Ruhepuls spricht meist für ein gut trainiertes Herz-Kreislauf-System.',
+    accordion: 'Der Ruhepuls ist die Zahl deiner Herzschläge pro Minute in Ruhe. Ausdauertraining senkt ihn tendenziell über die Zeit; Stress, Krankheit, Koffein, Alkohol oder wenig Schlaf heben ihn kurzfristig. Er ist alters- und geschlechtsabhängig sowie individuell — beobachte vor allem deinen eigenen Trend. Die Einordnung unten ist ein altersnormierter Richtwert (keine medizinische Aussage).',
+    staticNote: 'Für die altersnormierte Einordnung Geburtsdatum in den Einstellungen hinterlegen.',
+    classify: ({ cur, age, sex }) => {
+      if (cur == null || age == null) return null
+      const gk = NORM_GROUP(age)
+      const idx = NORM_BIN(cur, normRow(RHR_NORM, sex, gk))
+      const sn = sex ? '' : ' · geschlechtsneutral'
+      return { text: `Ruhepuls ${Math.round(cur)} bpm — für dein Alter (Gruppe ${NORM_GROUP_LABEL(gk)}${sn}): ${RHR_LABELS[idx]}.`, color: RHR_COLORS[idx] }
+    },
+  },
+  fitness_age: {
+    bubble: 'Dein Fitnessalter im Vergleich zum kalendarischen — niedriger als dein echtes Alter ist gut.',
+    accordion: 'Fitness Age übersetzt Werte wie VO2max, Ruhepuls, Aktivität und Körperzusammensetzung in ein "biologisches" Fitnessalter. Liegt es unter deinem echten Alter, bist du fitter als der Durchschnitt deiner Altersgruppe. Es reagiert träge — nachhaltige Verbesserungen zeigen sich über Monate. Der Vergleich zum kalendarischen Alter ist der Kern der Aussage.',
+    classify: ({ cur, row }) => {
+      if (cur == null) return null
+      const chrono = numN(row?.fitness_age_chronological); if (chrono == null) return null
+      const val = cur.toFixed(1).replace('.', ',')
+      const diff = cur - chrono
+      if (diff < -0.5) return { text: `Dein Fitnessalter (${val}) liegt unter deinem kalendarischen Alter (${chrono}) — fitter als der Durchschnitt deiner Altersgruppe.`, color: C_GREEN }
+      if (diff > 0.5) return { text: `Dein Fitnessalter (${val}) liegt über deinem kalendarischen Alter (${chrono}).`, color: C_AMBER }
+      return { text: `Dein Fitnessalter (${val}) entspricht etwa deinem kalendarischen Alter (${chrono}).`, color: C_NEUTRAL }
+    },
+  },
+  endurance: {
+    bubble: 'Bewertung deiner Ausdauerfähigkeit über alle Distanzen — steigt mit konstantem Ausdauertraining.',
+    accordion: 'Der Endurance Score bewertet, wie gut dein Körper länger andauernde Belastungen bewältigt, basierend auf VO2max und dem Volumen/der Intensität deiner Einheiten über die Zeit. Höher = bessere Ausdauerbasis. Er wächst durch regelmäßiges, auch längeres Training und ist ein Langzeit-Indikator, kein Tageswert.',
+    staticNote: 'Kein fester Schwellwert — Fokus auf deinen eigenen Trend.',
+  },
+  hill: {
+    bubble: 'Deine Fähigkeit, bergauf Leistung zu bringen — kombiniert Kraft und Ausdauer am Anstieg.',
+    accordion: 'Der Hill Score bewertet deine Bergauf-Leistungsfähigkeit aus der Leistung, die du an Anstiegen erbringst, und setzt Kraft- und Ausdauerkomponente zusammen. Höher = besser am Berg. Relevant vor allem für Läufer/Radfahrer mit Höhenmetern; ohne Anstiege im Training bleibt er flach.',
+    staticNote: 'Kein fester Schwellwert — Fokus auf deinen eigenen Trend.',
+  },
+  readiness: {
+    bubble: 'Wie bereit dein Körper heute für intensives Training ist — aus Schlaf, Erholung, HRV und jüngster Last.',
+    accordion: 'Training Readiness bündelt Schlafqualität, Erholungszeit, HRV, akute Last und Stress zu einer Tagesempfehlung. Hoch = guter Tag für Intensität; niedrig = eher Erholung/leichtes Training. Bereiche: 80–100 = hoch (bereit); 50–79 = mittel; unter 50 = niedrig (Erholung ratsam). Es ist eine Momentaufnahme am Morgen, kein Verbot — dein Gefühl zählt mit.',
+    classify: ({ cur, row }) => {
+      if (cur == null) return null
+      const v = Math.round(cur)
+      const lvl = typeof row?.tr_level === 'string' && row.tr_level ? ` (${row.tr_level})` : ''
+      const [b, c] = v >= 80 ? ['hoch – bereit', C_GREEN] : v >= 50 ? ['mittel', C_AMBER] : ['niedrig – Erholung ratsam', C_RED]
+      return { text: `Dein Score (${v})${lvl} liegt im Bereich „${b}".`, color: c }
+    },
+  },
+  race: {
+    bubble: 'Geschätzte Bestzeit über die gewählte Distanz, wenn du heute in Form antreten würdest — eine Formprognose, kein geplantes Rennen.',
+    accordion: 'Die Prognose leitet aus deiner aktuellen Fitness (v.a. VO2max und Trainingslast) ab, welche Zeit über 5 km / 10 km / Halbmarathon / Marathon realistisch wäre. Sie verbessert sich, wenn deine Form steigt. Es ist eine Schätzung unter Idealbedingungen — Strecke, Wetter und Tagesform beeinflussen die echte Zeit.',
+    staticNote: 'Kein fester Schwellwert — beobachte deinen eigenen Prognose-Trend.',
+  },
+}
+
+function KpiExplain({ w, maps, dist, age, sex }: { w: WidgetDef; maps: Maps; dist: RaceDist; age: number | null; sex: Sex | null }) {
+  const [open, setOpen] = useState(false)
+  const ex = EXPLAIN[w.id]
+  const getFn = w.special === 'race' ? (r: Record<string, unknown>) => numN(r[RACE_COL[dist]]) : w.get
+  const { cur, row } = useMemo(() => {
+    const entries = [...maps[w.src].entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1))
+    for (const [, r] of entries) { const v = getFn(r); if (v != null) return { cur: v, row: r } }
+    return { cur: null as number | null, row: entries[0]?.[1] ?? null }
+  }, [maps, w, dist])
+  const avg30 = useMemo(() => {
+    const nn = buildSeries(w, maps, 30, w.special === 'race' ? getFn : undefined).filter((v): v is number => v != null)
+    return nn.length ? Math.round(nn.reduce((a, b) => a + b, 0) / nn.length) : null
+  }, [maps, w, dist])
+  if (!ex) return null
+  const cls = ex.classify ? ex.classify({ cur, row, avg30, age, sex }) : null
+  return (
+    <div style={{ marginTop: 20 }}>
+      <div style={{ display: 'flex', gap: 11, padding: '14px 16px', borderRadius: 16, background: 'color-mix(in srgb, var(--accent) 8%, var(--track))', border: '1px solid var(--hair)' }}>
+        <div style={{ fontSize: 17, lineHeight: 1.3, flex: 'none' }}>💡</div>
+        <div style={{ fontSize: 13.5, fontWeight: 650, color: 'var(--ink)', lineHeight: 1.5 }}>{ex.bubble}</div>
+      </div>
+      <div onClick={() => setOpen((o) => !o)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 10, padding: '7px 12px', borderRadius: 10, cursor: 'pointer', fontSize: 12.5, fontWeight: 800, color: 'var(--ink2)', background: 'var(--track)' }}>
+        Mehr erfahren
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .18s ease' }}><path d="M6 9l6 6 6-6" /></svg>
+      </div>
+      {open && (
+        <div style={{ marginTop: 10, padding: '15px 17px', borderRadius: 16, border: '1px solid var(--hair)', background: 'var(--card)' }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink2)', lineHeight: 1.65 }}>{ex.accordion}</div>
+          {cls && (
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9, marginTop: 13, padding: '11px 13px', borderRadius: 12, background: `color-mix(in srgb, ${cls.color} 12%, transparent)` }}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: cls.color, marginTop: 5, flex: 'none' }} />
+              <div style={{ fontSize: 12.5, fontWeight: 750, color: 'var(--ink)', lineHeight: 1.5 }}><span style={{ color: cls.color }}>Deine Einordnung:</span> {cls.text}</div>
+            </div>
+          )}
+          {!cls && ex.staticNote && <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--ink3)', marginTop: 12, lineHeight: 1.5 }}>Einordnung: {ex.staticNote}</div>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ZoomModal({ w, maps, intraday, color, dist, onDist, age, sex, onClose }: { w: WidgetDef; maps: Maps; intraday?: Map<string, GarminIntraday>; color: string; dist: RaceDist; onDist: (d: RaceDist) => void; age: number | null; sex: Sex | null; onClose: () => void }) {
   const [period, setPeriod] = useState<ZoomPeriod>('month')
   const [iDay, setIDay] = useState<string | null>(null)
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k) }, [onClose])
@@ -1088,6 +1336,8 @@ function ZoomModal({ w, maps, intraday, color, dist, onDist, onClose }: { w: Wid
           </div>
           <div onClick={onClose} style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--track)', display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--ink2)' }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg></div>
         </div>
+
+        <KpiExplain w={w} maps={maps} dist={dist} age={age} sex={sex} />
 
         <div style={{ background: 'var(--card)', border: '1px solid var(--hair)', borderRadius: 18, padding: '18px 16px', marginTop: 20 }}>
           {st ? (
@@ -1144,10 +1394,15 @@ function Trends() {
   const [daily, setDaily] = useState<Record<string, unknown>[]>([])
   const [sleepR, setSleepR] = useState<Record<string, unknown>[]>([])
   const [scores, setScores] = useState<Record<string, unknown>[]>([])
+  const [health, setHealth] = useState<Record<string, unknown>[]>([])
   const [intraday, setIntraday] = useState<GarminIntraday[]>([])
+  const [birthDate, setBirthDate] = useState<string>('')
+  const [sex, setSex] = useState<Sex | null>(null)
 
   useEffect(() => {
     api.getSettings().then((s) => {
+      setBirthDate(s.birth_date || '')
+      setSex(s.sex === 'm' || s.sex === 'w' ? s.sex : null)
       try { const p = JSON.parse(s.puls_trends_layout || 'null'); if (p && Array.isArray(p.visible)) { setLayout(reconcile(p)); return } } catch { /* Default */ }
       const def = defaultLayout(); setLayout(def); void api.updateSettings({ puls_trends_layout: JSON.stringify(def) })
     }).catch(() => setLayout(defaultLayout()))
@@ -1155,15 +1410,18 @@ function Trends() {
     api.getGarminDaily(from, to).then((r) => setDaily(r as unknown as Record<string, unknown>[])).catch(() => {})
     api.getGarminSleep(from, to).then((r) => setSleepR(r as unknown as Record<string, unknown>[])).catch(() => {})
     api.getGarminScores(from, to).then((r) => setScores(r as unknown as Record<string, unknown>[])).catch(() => {})
+    api.getGarminHealth(from, to).then((r) => setHealth(r as unknown as Record<string, unknown>[])).catch(() => {})
     api.getGarminIntraday(from, to).then(setIntraday).catch(() => {})
   }, [])
   const intradayMap = useMemo(() => new Map(intraday.map((r) => [r.calendar_date, r])), [intraday])
+  const age = useMemo(() => ageFromBirthdate(birthDate), [birthDate])
 
   const maps = useMemo<Maps>(() => ({
     daily: new Map(daily.map((r) => [String(r.calendar_date), r])),
     sleep: new Map(sleepR.map((r) => [String(r.calendar_date), r])),
     scores: new Map(scores.map((r) => [String(r.calendar_date), r])),
-  }), [daily, sleepR, scores])
+    health: new Map(health.map((r) => [String(r.calendar_date), r])),
+  }), [daily, sleepR, scores, health])
 
   function persist(next: Layout) { setLayout(next); void api.updateSettings({ puls_trends_layout: JSON.stringify(next) }) }
   function remove(id: string) { if (!layout) return; persist({ ...layout, visible: layout.visible.filter((x) => x !== id), hidden: [id, ...layout.hidden.filter((x) => x !== id)] }) }
@@ -1252,7 +1510,7 @@ function Trends() {
         </div>
       )}
 
-      {zoomW && <ZoomModal w={zoomW} maps={maps} intraday={intradayMap} color={colorOf(zoomW.id)} dist={distOf(zoomW.id)} onDist={(d) => setDist(zoomW.id, d)} onClose={() => setZoom(null)} />}
+      {zoomW && <ZoomModal w={zoomW} maps={maps} intraday={intradayMap} color={colorOf(zoomW.id)} dist={distOf(zoomW.id)} onDist={(d) => setDist(zoomW.id, d)} age={age} sex={sex} onClose={() => setZoom(null)} />}
     </div>
   )
 }

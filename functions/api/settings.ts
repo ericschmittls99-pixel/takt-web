@@ -1,7 +1,7 @@
 import { badRequest, json, type Env } from '../_utils'
 
 // Whitelist bearbeitbarer Einstellungen.
-const KEYS = new Set(['accent_color', 'start_date', 'bundesland', 'absence_types', 'hotkeys', 'puls_trends_layout'])
+const KEYS = new Set(['accent_color', 'start_date', 'bundesland', 'birth_date', 'sex', 'absence_types', 'hotkeys', 'puls_trends_layout'])
 
 export const onRequestGet: PagesFunction<Env> = async ({ env }) => {
   const { results } = await env.DB.prepare('SELECT key, value FROM app_settings').all<{ key: string; value: string }>()

@@ -29,6 +29,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   accent_color: '#22C55E',
   start_date: '2000-01-01',
   bundesland: 'RP',
+  birth_date: '',
+  sex: '',
   absence_types: '[]',
   hotkeys: JSON.stringify(DEFAULT_HOTKEYS),
   puls_trends_layout: '',

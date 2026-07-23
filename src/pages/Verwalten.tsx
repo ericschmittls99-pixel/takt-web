@@ -478,6 +478,22 @@ export default function Verwalten({ theme, onToggleTheme, onBack, onOpenTodos, o
                     </select>
                   </div>
                 </div>
+                <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+                  <div style={{ flex: '1 1 200px' }}>
+                    <div style={label}>Geburtsdatum</div>
+                    <input type="date" lang="de-DE" value={settings.birth_date} onChange={(e) => void persistSettings({ birth_date: e.target.value })} style={{ ...field, fontSize: 15 }} />
+                    <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--ink3)', marginTop: 6 }}>Für altersnormierte Einordnung (VO2max, Ruhepuls). Alter wird laufend berechnet.</div>
+                  </div>
+                  <div style={{ flex: '1 1 200px' }}>
+                    <div style={label}>Geschlecht (Norm-Tabelle)</div>
+                    <select value={settings.sex} onChange={(e) => void persistSettings({ sex: e.target.value })} style={{ ...field, fontSize: 15, cursor: 'pointer' }}>
+                      <option value="">Neutral (Ø)</option>
+                      <option value="m">Männlich</option>
+                      <option value="w">Weiblich</option>
+                    </select>
+                    <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--ink3)', marginTop: 6 }}>Verfeinert die alterskorrigierte Kategorie; ohne Angabe geschlechtsneutral.</div>
+                  </div>
+                </div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
                   <div>
                     <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--ink)' }}>Dunkles Design</div>

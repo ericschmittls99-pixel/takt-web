@@ -31,6 +31,8 @@ export interface AppSettings {
   accent_color: string
   start_date: string
   bundesland: string
+  birth_date: string // YYYY-MM-DD; Alter wird zur Laufzeit berechnet (nie als Zahl speichern)
+  sex: string // 'm' | 'w' | '' (leer = geschlechtsneutrale Norm)
   absence_types: string // JSON-Array (AbsenceTypeConfig[])
   hotkeys: string // JSON-Objekt (CommandId → Kombi-String, z. B. "mod+k")
   puls_trends_layout: string // JSON { visible: string[], hidden: string[] }
@@ -190,6 +192,14 @@ export interface GarminIntraday {
   calendar_date: string
   body_battery_curve: IntradayPoint[] | null
   stress_curve: IntradayPoint[] | null
+}
+
+export interface GarminHealth {
+  calendar_date: string
+  vo2max: number | null
+  weight_g: number | null // Garmin liefert Gramm; UI zeigt kg
+  bmi: number | null
+  body_fat: number | null
 }
 
 export interface GarminScores {
@@ -495,6 +505,8 @@ export const api = {
 
   getGarminScores: (from: string, to: string) => request<GarminScores[]>(`/api/garmin/scores?from=${from}&to=${to}`),
   getGarminIntraday: (from: string, to: string) => request<GarminIntraday[]>(`/api/garmin/intraday?from=${from}&to=${to}`),
+
+  getGarminHealth: (from: string, to: string) => request<GarminHealth[]>(`/api/garmin/health?from=${from}&to=${to}`),
 
   getGarminActivity: (id: number) => request<GarminActivityDetail>(`/api/garmin/activities/${id}`),
 
