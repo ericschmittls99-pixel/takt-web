@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { api, type AppSettings, type Employer, type GarminDaily, type GarminIntraday, type GarminScores, type GarminSleep, type IntradayPoint, type PlannedBlock, type PlannedOverride, type Project, type Workout } from '../api'
 import { employerColor } from '../colors'
 import { holidayName } from '../holidays'
@@ -46,6 +46,74 @@ function sparkPath(vals: number[], w: number, h: number, p = 3): string {
   const mn = Math.min(...vals), mx = Math.max(...vals), r = mx - mn || 1, sx = w / (vals.length - 1)
   return vals.map((v, i) => `${i ? 'L' : 'M'}${(i * sx).toFixed(1)} ${(p + (h - 2 * p) - ((v - mn) / r) * (h - 2 * p)).toFixed(1)}`).join(' ')
 }
+// ── Chart-Hover (Welle 4-1): Tooltip + Führungslinie + Punkt über beliebigen Kurven ──
+type HoverPoint = { v: number | null; label: string }
+function HoverOverlay({ pts, format, color, yFracAt, barMode = false }: { pts: HoverPoint[]; format: (v: number) => string; color: string; yFracAt: (i: number) => number | null; barMode?: boolean }) {
+  const [hi, setHi] = useState<number | null>(null)
+  const ref = useRef<HTMLDivElement>(null)
+  const n = pts.length
+  const nearestValid = (idx: number): number | null => {
+    if (n === 0) return null
+    for (let d = 0; d < n; d++) {
+      const a = idx - d, b = idx + d
+      if (a >= 0 && pts[a]?.v != null) return a
+      if (b < n && pts[b]?.v != null) return b
+    }
+    return null
+  }
+  const onMove = (e: ReactMouseEvent) => {
+    const el = ref.current; if (!el) return
+    const rect = el.getBoundingClientRect()
+    const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+    const raw = barMode ? Math.min(n - 1, Math.floor(frac * n)) : Math.round(frac * (n - 1))
+    setHi(nearestValid(raw))
+  }
+  const active = hi != null && pts[hi]?.v != null
+  const xf = hi == null ? 0 : barMode ? (hi + 0.5) / n : (n > 1 ? hi / (n - 1) : 0.5)
+  const yf = hi == null ? null : yFracAt(hi)
+  const flip = xf > 0.62
+  return (
+    <div ref={ref} onMouseMove={onMove} onMouseLeave={() => setHi(null)} style={{ position: 'absolute', inset: 0, cursor: 'crosshair', zIndex: 3 }}>
+      {active && (<>
+        <div style={{ position: 'absolute', left: `${xf * 100}%`, top: 0, bottom: 0, width: 1, background: 'var(--hair)', transform: 'translateX(-0.5px)', pointerEvents: 'none' }} />
+        {yf != null && <div style={{ position: 'absolute', left: `${xf * 100}%`, top: `${yf * 100}%`, width: 8, height: 8, borderRadius: '50%', background: color, border: '2px solid var(--card)', transform: 'translate(-50%,-50%)', pointerEvents: 'none', boxShadow: '0 1px 4px rgba(0,0,0,0.25)' }} />}
+        <div style={{ position: 'absolute', left: `${xf * 100}%`, top: 0, transform: `translate(${flip ? 'calc(-100% - 9px)' : '9px'}, -2px)`, pointerEvents: 'none', background: 'var(--glass-strong, var(--card))', border: '1px solid var(--border)', borderRadius: 9, padding: '5px 9px', boxShadow: '0 8px 22px -12px rgba(0,0,0,0.5)', whiteSpace: 'nowrap', zIndex: 4 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{format(pts[hi as number].v as number)}</div>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--ink3)', marginTop: 1 }}>{pts[hi as number].label}</div>
+        </div>
+      </>)}
+    </div>
+  )
+}
+// y-Fraktion (0=oben,1=unten) eines Punktes einer auto-skalierten Linie (wie sparkPath/linePathGapped)
+function lineYFrac(vals: (number | null)[], i: number, pFrac: number): number | null {
+  const v = vals[i]; if (v == null) return null
+  const nn = vals.filter((x): x is number => x != null)
+  if (nn.length < 2) return null
+  const mn = Math.min(...nn), mx = Math.max(...nn), r = mx - mn || 1
+  return pFrac + (1 - (v - mn) / r) * (1 - 2 * pFrac)
+}
+const fmtDayLabel = (d: Date) => `${WD[d.getDay()]}, ${d.getDate()}. ${MONTHS_SHORT[d.getMonth()]}`
+const fmtClock = (t: number | null): string => { if (t == null) return ''; const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}` }
+// Punkte für tages-basierte Serien (Index i ⇒ Datum today-(len-1)+i), label = Wochentag/Datum
+function dayHoverPts(vals: (number | null)[]): HoverPoint[] {
+  const len = vals.length
+  return vals.map((v, i) => ({ v, label: fmtDayLabel(addDays(new Date(), i - (len - 1))) }))
+}
+// „nette" Achsen-Ticks (9.6)
+function niceTicks(min: number, max: number, count = 4): number[] {
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return []
+  if (min === max) { const p = Math.abs(min) || 1; min -= p * 0.5; max += p * 0.5 }
+  const raw = (max - min) / count
+  const mag = Math.pow(10, Math.floor(Math.log10(raw || 1)))
+  const norm = raw / mag
+  const step = (norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10) * mag
+  const lo = Math.floor(min / step) * step, hi = Math.ceil(max / step) * step
+  const out: number[] = []
+  for (let v = lo; v <= hi + step * 0.5; v += step) out.push(Number(v.toFixed(6)))
+  return out
+}
+
 const GLASS: CSSProperties = { background: 'var(--glass)', backdropFilter: 'blur(20px) saturate(180%)', WebkitBackdropFilter: 'blur(20px) saturate(180%)', border: '1px solid var(--hair)' }
 const CARD: CSSProperties = { background: 'var(--card)', backdropFilter: 'blur(20px) saturate(180%)', WebkitBackdropFilter: 'blur(20px) saturate(180%)', border: '1px solid var(--border)', boxShadow: 'var(--card-shadow, 0 22px 48px -30px rgba(17,24,39,0.5))' }
 const kicker: CSSProperties = { fontSize: 11, fontWeight: 800, letterSpacing: '1.4px', textTransform: 'uppercase', color: 'var(--ink3)' }
@@ -244,11 +312,15 @@ function IntradayChart({ pts, color, domainMax = 100, height = 84 }: { pts: Intr
   const yy = (v: number) => height - 3 - (Math.max(0, Math.min(domainMax, v)) / domainMax) * (height - 6)
   const line = vals.map((v, i) => `${i ? 'L' : 'M'}${xx(i).toFixed(1)} ${yy(v).toFixed(1)}`).join(' ')
   const area = `M0 ${height} ${vals.map((v, i) => `L${xx(i).toFixed(1)} ${yy(v).toFixed(1)}`).join(' ')} L${W} ${height} Z`
+  const hpts: HoverPoint[] = pts.map((p) => ({ v: p.v, label: fmtClock(p.t) }))
   return (
-    <svg width="100%" height={height} viewBox={`0 0 ${W} ${height}`} preserveAspectRatio="none" style={{ display: 'block', overflow: 'visible' }}>
-      <path d={area} fill={hexA(color, 0.13)} stroke="none" />
-      <path d={line} fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+    <div style={{ position: 'relative' }}>
+      <svg width="100%" height={height} viewBox={`0 0 ${W} ${height}`} preserveAspectRatio="none" style={{ display: 'block', overflow: 'visible' }}>
+        <path d={area} fill={hexA(color, 0.13)} stroke="none" />
+        <path d={line} fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      <HoverOverlay pts={hpts} color={color} format={(v) => `${Math.round(v)}`} yFracAt={(i) => yy(vals[i]) / height} />
+    </div>
   )
 }
 
@@ -639,13 +711,18 @@ function Schlaf({ sleepRange, scoresRange }: { sleepRange: GarminSleep[]; scores
         {miniCurves.length > 0 && (
           <div style={{ display: 'grid', gridTemplateColumns: `repeat(${miniCurves.length}, 1fr)`, gap: 12, marginTop: 18 }}>
             {miniCurves.map(([label, arr, color]) => {
-              const vals = (arr as { t: number; v: number }[]).map((p) => p.v)
+              const cp = arr as { t: number; v: number }[]
+              const vals = cp.map((p) => p.v)
+              const hpts: HoverPoint[] = cp.map((p) => ({ v: p.v, label: fmtClock(p.t) }))
               return (
                 <div key={label} style={{ background: 'var(--track)', borderRadius: 14, padding: '12px 14px' }}>
                   <div style={{ ...kicker, fontSize: 10.5, marginBottom: 8 }}>{label} · Nacht</div>
-                  <svg width="100%" height="40" viewBox="0 0 200 40" preserveAspectRatio="none" style={{ display: 'block', overflow: 'visible' }}>
-                    <path d={sparkPath(vals, 200, 40, 4)} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
+                  <div style={{ position: 'relative' }}>
+                    <svg width="100%" height="40" viewBox="0 0 200 40" preserveAspectRatio="none" style={{ display: 'block', overflow: 'visible' }}>
+                      <path d={sparkPath(vals, 200, 40, 4)} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    <HoverOverlay pts={hpts} color={color} format={(v) => `${Math.round(v)}`} yFracAt={(i) => lineYFrac(vals, i, 4 / 40)} />
+                  </div>
                 </div>
               )
             })}
@@ -665,11 +742,13 @@ function Schlaf({ sleepRange, scoresRange }: { sleepRange: GarminSleep[]; scores
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 14 }}>
           {trendDefs.map((t) => {
-            const series = chrono.map(t.get).filter((v): v is number => v != null)
+            const nn = chrono.map((n) => ({ date: n.calendar_date, v: t.get(n) })).filter((p): p is { date: string; v: number } => p.v != null)
+            const series = nn.map((p) => p.v)
             if (series.length === 0) return <div key={t.label} style={{ background: 'var(--track)', borderRadius: 18, padding: '16px 18px', color: 'var(--ink3)', fontWeight: 700, fontSize: 12.5 }}>{t.label} · keine Daten</div>
             const avg = Math.round(series.reduce((a, b) => a + b, 0) / series.length)
             const delta = Math.round(series[series.length - 1] - series[0])
             const good = t.up === 'good' ? delta >= 0 : delta <= 0
+            const hpts: HoverPoint[] = nn.map((p) => ({ v: p.v, label: fmtDayLabel(dateFromKey(p.date)) }))
             return (
               <div key={t.label} style={{ background: 'var(--track)', borderRadius: 18, padding: '16px 18px' }}>
                 <div style={{ ...kicker, fontSize: 10.5 }}>{t.label}</div>
@@ -678,9 +757,12 @@ function Schlaf({ sleepRange, scoresRange }: { sleepRange: GarminSleep[]; scores
                   <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink3)' }}>{t.unit || 'Ø'}</div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
-                  <svg width="120" height="30" viewBox="0 0 120 30" preserveAspectRatio="none" style={{ overflow: 'visible' }}>
-                    <path d={sparkPath(series, 120, 30, 3)} fill="none" stroke={t.color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
+                  <div style={{ position: 'relative', width: 120, height: 30 }}>
+                    <svg width="120" height="30" viewBox="0 0 120 30" preserveAspectRatio="none" style={{ overflow: 'visible', display: 'block' }}>
+                      <path d={sparkPath(series, 120, 30, 3)} fill="none" stroke={t.color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    <HoverOverlay pts={hpts} color={t.color} format={(v) => `${Math.round(v)}${t.unit ? ' ' + t.unit : ''}`} yFracAt={(i) => lineYFrac(series, i, 3 / 30)} />
+                  </div>
                   <div style={{ fontSize: 12.5, fontWeight: 800, color: delta === 0 ? 'var(--ink3)' : good ? '#22C55E' : '#EF4444' }}>{delta > 0 ? '+' : ''}{delta}</div>
                 </div>
               </div>
@@ -708,7 +790,25 @@ interface WidgetDef {
   intradayKey?: 'body_battery_curve' | 'stress_curve'  // Zoom-Modal zeigt zusätzlich den 3-Min-Tagesverlauf
 }
 const numN = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
-const fmtMMSS = (sec: number) => `${Math.floor(sec / 60)}:${pad(Math.round(sec % 60))}`
+
+// Race-Predictions (9.8): wählbare Distanz je Widget
+type RaceDist = '5k' | '10k' | 'hm' | 'm'
+const RACE_DISTS: RaceDist[] = ['5k', '10k', 'hm', 'm']
+const RACE_COL: Record<RaceDist, string> = { '5k': 'race_5k_sec', '10k': 'race_10k_sec', 'hm': 'race_hm_sec', 'm': 'race_m_sec' }
+const RACE_LABEL: Record<RaceDist, string> = { '5k': '5 km', '10k': '10 km', 'hm': 'Halbmarathon', 'm': 'Marathon' }
+const RACE_SHORT: Record<RaceDist, string> = { '5k': '5k', '10k': '10k', 'hm': 'HM', 'm': 'M' }
+function fmtRaceTime(sec: number): string { const s = Math.round(sec); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60; return h > 0 ? `${h}:${pad(m)}:${pad(ss)}` : `${m}:${pad(ss)}` }
+function RaceControl({ dist, onDist, small }: { dist: RaceDist; onDist: (d: RaceDist) => void; small?: boolean }) {
+  return (
+    <div onClick={(e) => e.stopPropagation()} style={{ display: 'inline-flex', padding: 2, gap: 2, borderRadius: 10, background: 'var(--track)' }}>
+      {RACE_DISTS.map((d) => <div key={d} onClick={() => onDist(d)} style={{ padding: small ? '3px 9px' : '6px 12px', borderRadius: 7, fontSize: small ? 11 : 12.5, fontWeight: 800, cursor: 'pointer', color: d === dist ? 'var(--ink)' : 'var(--ink3)', background: d === dist ? 'var(--seg-active, #fff)' : 'transparent' }}>{RACE_SHORT[d]}</div>)}
+    </div>
+  )
+}
+
+// Widget-Farbwahl (9.7): 4 Standard + freie Palette; Default = --accent
+const WIDGET_STD_COLORS = ['#7C5CFF', '#22C55E', '#F59E0B', '#EF4444']
+const WIDGET_PALETTE = ['#7C5CFF', '#5B8DEF', '#0EA5E9', '#14B8A6', '#22C55E', '#84CC16', '#EAB308', '#F59E0B', '#F97316', '#EF4444', '#EC4899', '#A855F7']
 
 const WIDGETS: WidgetDef[] = [
   // Gruppe A — garmin_daily / garmin_sleep
@@ -729,7 +829,7 @@ const WIDGETS: WidgetDef[] = [
   { id: 'endurance', name: 'Endurance Score', icon: '🏅', type: 'sparkline', group: 'B', defaultVisible: true, src: 'scores', get: (r) => numN(r.endurance_score), goodDir: 'up' },
   { id: 'hill', name: 'Hill Score', icon: '⛰️', type: 'sparkline', group: 'B', defaultVisible: false, src: 'scores', get: (r) => numN(r.hill_score), goodDir: 'up' },
   { id: 'fitness_age', name: 'Fitness Age', icon: '🎂', type: 'kennzahl-ziel', group: 'B', defaultVisible: true, src: 'scores', get: (r) => numN(r.fitness_age), target: (r) => numN(r.fitness_age_chronological), goodDir: 'down', fmt: (v) => v.toFixed(1).replace('.', ',') },
-  { id: 'race', name: 'Race Predictions', icon: '🏁', type: 'sparkline', group: 'B', defaultVisible: false, src: 'scores', get: (r) => numN(r.race_5k_sec), goodDir: 'down', fmt: fmtMMSS },
+  { id: 'race', name: 'Race Predictions', icon: '🏁', type: 'sparkline', group: 'B', defaultVisible: false, src: 'scores', get: (r) => numN(r.race_5k_sec), goodDir: 'down', fmt: fmtRaceTime, special: 'race' },
   { id: 'training_status', name: 'Training Status', icon: '🧭', type: 'kennzahl-ziel', group: 'B', defaultVisible: false, src: 'scores', get: (r) => numN(r.training_status_code), special: 'status' },
   { id: 'load', name: 'Trainingslast (ACWR)', icon: '📊', type: 'sparkline', group: 'B', defaultVisible: true, src: 'scores', get: (r) => numN(r.tr_acute_load), goodDir: 'up', special: 'load' },
 ]
@@ -744,23 +844,29 @@ const ACWR_INFO = (p: number | null) => {
   return { label: 'hoch', color: '#EF4444' }
 }
 
-type Layout = { visible: string[]; hidden: string[] }
-function defaultLayout(): Layout { return { visible: WIDGETS.filter((w) => w.defaultVisible).map((w) => w.id), hidden: WIDGETS.filter((w) => !w.defaultVisible).map((w) => w.id) } }
+type WidgetOpts = { dist?: RaceDist }
+type Layout = { visible: string[]; hidden: string[]; colors: Record<string, string>; opts: Record<string, WidgetOpts> }
+function defaultLayout(): Layout { return { visible: WIDGETS.filter((w) => w.defaultVisible).map((w) => w.id), hidden: WIDGETS.filter((w) => !w.defaultVisible).map((w) => w.id), colors: {}, opts: {} } }
 function reconcile(l: Layout): Layout {
   const known = new Set(WIDGETS.map((w) => w.id))
   const visible = (l.visible || []).filter((id) => known.has(id))
   const hidden = (l.hidden || []).filter((id) => known.has(id) && !visible.includes(id))
   const placed = new Set([...visible, ...hidden])
   for (const w of WIDGETS) if (!placed.has(w.id)) (w.defaultVisible ? visible : hidden).push(w.id)
-  return { visible, hidden }
+  const colors: Record<string, string> = {}
+  for (const [id, c] of Object.entries(l.colors || {})) if (known.has(id) && typeof c === 'string') colors[id] = c
+  const opts: Record<string, WidgetOpts> = {}
+  for (const [id, o] of Object.entries(l.opts || {})) if (known.has(id) && o) opts[id] = o
+  return { visible, hidden, colors, opts }
 }
 
 type Maps = Record<Src, Map<string, Record<string, unknown>>>
-function buildSeries(w: WidgetDef, maps: Maps, days: number): (number | null)[] {
+function buildSeries(w: WidgetDef, maps: Maps, days: number, getFn?: (r: Record<string, unknown>) => number | null): (number | null)[] {
+  const g = getFn ?? w.get
   const out: (number | null)[] = []
   for (let i = days - 1; i >= 0; i--) {
     const r = maps[w.src].get(dayKey(addDays(new Date(), -i)))
-    out.push(r ? w.get(r) : null)
+    out.push(r ? g(r) : null)
   }
   return out
 }
@@ -789,9 +895,10 @@ function changeDots(vals: (number | null)[], w: number, h: number, p = 3): { x: 
 }
 function fmtVal(w: WidgetDef, v: number): string { return w.fmt ? w.fmt(v) : `${w.decimals != null ? v.toFixed(w.decimals) : Math.round(v)}${w.unit ? ' ' + w.unit : ''}` }
 
-function WidgetBody({ w, maps }: { w: WidgetDef; maps: Maps }) {
-  const accent = 'var(--accent)'
-  const vals = buildSeries(w, maps, 90)
+function WidgetBody({ w, maps, color, dist, onDist }: { w: WidgetDef; maps: Maps; color: string; dist: RaceDist; onDist: (d: RaceDist) => void }) {
+  const accent = color
+  const getFn = w.special === 'race' ? (r: Record<string, unknown>) => numN(r[RACE_COL[dist]]) : undefined
+  const vals = buildSeries(w, maps, 90, getFn)
   const st = statsOf(vals)
   if (!st) return <div style={{ marginTop: 10, fontSize: 12.5, fontWeight: 700, color: 'var(--ink3)' }}>Keine Daten im Zeitraum.</div>
 
@@ -831,8 +938,11 @@ function WidgetBody({ w, maps }: { w: WidgetDef; maps: Maps }) {
     return (
       <div>
         <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: '-0.6px', fontVariantNumeric: 'tabular-nums' }}>{fmtVal(w, st.last)}</div>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 46, marginTop: 8 }}>
-          {last.map((v, i) => <div key={i} style={{ flex: 1, height: v != null ? `${(v / mx) * 100}%` : 0, background: accent, borderRadius: '3px 3px 1px 1px', opacity: 0.85 }} />)}
+        <div style={{ position: 'relative', marginTop: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 46 }}>
+            {last.map((v, i) => <div key={i} style={{ flex: 1, height: v != null ? `${(v / mx) * 100}%` : 0, background: accent, borderRadius: '3px 3px 1px 1px', opacity: 0.85 }} />)}
+          </div>
+          <HoverOverlay pts={dayHoverPts(last)} color={accent} format={(v) => fmtVal(w, v)} yFracAt={(i) => (last[i] == null ? null : 1 - (last[i] as number) / mx)} barMode />
         </div>
       </div>
     )
@@ -846,25 +956,87 @@ function WidgetBody({ w, maps }: { w: WidgetDef; maps: Maps }) {
         <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.9px', fontVariantNumeric: 'tabular-nums' }}>{fmtVal(w, st.last)}</div>
         {w.special === 'load' && (() => { const p = numN((maps.scores.get(dayKey(new Date())) ?? [...maps.scores.values()][0] ?? {}).tr_acwr_percent); const a = ACWR_INFO(p); return <div style={{ fontSize: 11, fontWeight: 800, padding: '2px 8px', borderRadius: 7, background: `color-mix(in srgb, ${a.color} 16%, transparent)`, color: a.color }}>ACWR {a.label}</div> })()}
       </div>
-      <svg width="100%" height="46" viewBox="0 0 200 46" preserveAspectRatio="none" style={{ display: 'block', overflow: 'visible', marginTop: 8 }}>
-        <path d={linePathGapped(vals, 200, 46, 4)} fill="none" stroke={accent} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-        {dots.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r="2.6" fill={accent} />)}
-      </svg>
+      {w.special === 'race' && <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink3)', marginTop: 3 }}>Geschätzte Bestzeit über {RACE_LABEL[dist]}</div>}
+      <div style={{ position: 'relative', marginTop: 8 }}>
+        <svg width="100%" height="46" viewBox="0 0 200 46" preserveAspectRatio="none" style={{ display: 'block', overflow: 'visible' }}>
+          <path d={linePathGapped(vals, 200, 46, 4)} fill="none" stroke={accent} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+          {dots.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r="2.6" fill={accent} />)}
+        </svg>
+        <HoverOverlay pts={dayHoverPts(vals)} color={accent} format={(v) => fmtVal(w, v)} yFracAt={(i) => lineYFrac(vals, i, 4 / 46)} />
+      </div>
       {w.special === 'vo2max' && <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink3)', marginTop: 4 }}>Punkte = gemessen · Linie fortgeschrieben</div>}
+      {w.special === 'race' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+          <RaceControl dist={dist} onDist={onDist} small />
+          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink3)' }}>Formprognose · kein Event</div>
+        </div>
+      )}
     </div>
   )
 }
 
-function ZoomModal({ w, maps, intraday, onClose }: { w: WidgetDef; maps: Maps; intraday?: Map<string, GarminIntraday>; onClose: () => void }) {
-  const [period, setPeriod] = useState<'week' | 'month' | 'year' | 'all'>('month')
+type ZoomPeriod = 'week' | 'month' | 'year' | 'all'
+// Großer Graph im Zoom-Modal mit lesbaren X/Y-Achsen (9.6) + Hover (9.1)
+function ZoomChart({ vals, period, bars, color, fmtValue, fmtTick, showDots }: { vals: (number | null)[]; period: ZoomPeriod; bars: boolean; color: string; fmtValue: (v: number) => string; fmtTick: (v: number) => string; showDots?: boolean }) {
+  const H = 260, W = 900
+  const nn = vals.filter((v): v is number => v != null)
+  const dataMin = Math.min(...nn), dataMax = Math.max(...nn)
+  const ticks = niceTicks(bars ? 0 : dataMin, dataMax, 4)
+  const lo = bars ? 0 : ticks[0], hi = ticks[ticks.length - 1]
+  const span = hi - lo || 1
+  const yf = (v: number) => 1 - (v - lo) / span
+  const n = vals.length, sx = W / (n - 1 || 1)
+  let dLine = '', pen = false
+  vals.forEach((v, i) => { if (v == null) { pen = false; return } dLine += `${pen ? 'L' : 'M'}${(i * sx).toFixed(1)} ${(yf(v) * H).toFixed(1)} `; pen = true })
+  const dots: { x: number; y: number }[] = []
+  if (showDots) { let prev: number | null = null; vals.forEach((v, i) => { if (v == null) return; if (prev == null || v !== prev) dots.push({ x: i * sx, y: yf(v) * H }); prev = v }) }
+  const step = Math.max(1, Math.round(n / 6))
+  const xIdx: number[] = []
+  for (let i = 0; i < n; i += step) xIdx.push(i)
+  if (xIdx[xIdx.length - 1] !== n - 1) xIdx.push(n - 1)
+  let lastTxt = ''
+  const xLabels = xIdx.map((i) => {
+    const d = addDays(new Date(), i - (n - 1))
+    const txt = period === 'week' ? `${WD[d.getDay()]} ${d.getDate()}.` : period === 'month' ? `${d.getDate()}.${d.getMonth() + 1}.` : MONTHS_SHORT[d.getMonth()]
+    const dup = txt === lastTxt; lastTxt = txt
+    return { xf: bars ? (i + 0.5) / n : (n > 1 ? i / (n - 1) : 0.5), txt: dup ? '' : txt }
+  })
+  return (
+    <div style={{ display: 'flex', gap: 8 }}>
+      <div style={{ width: 46, position: 'relative', height: H, flex: 'none' }}>
+        {ticks.map((t) => <div key={t} style={{ position: 'absolute', right: 4, top: `${yf(t) * 100}%`, transform: 'translateY(-50%)', fontSize: 10.5, fontWeight: 700, color: 'var(--ink3)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{fmtTick(t)}</div>)}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ position: 'relative', height: H }}>
+          {ticks.map((t) => <div key={t} style={{ position: 'absolute', left: 0, right: 0, top: `${yf(t) * 100}%`, height: 1, background: 'var(--hair)', opacity: 0.55 }} />)}
+          {bars ? (
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'flex-end', gap: 1 }}>{vals.map((v, i) => <div key={i} style={{ flex: 1, height: v != null ? `${((v - lo) / span) * 100}%` : 0, background: color, opacity: 0.85, borderRadius: '2px 2px 0 0' }} />)}</div>
+          ) : (
+            <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, overflow: 'visible' }}>
+              <path d={dLine.trim()} fill="none" stroke={color} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+              {dots.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r="3.4" fill={color} />)}
+            </svg>
+          )}
+          <HoverOverlay pts={dayHoverPts(vals)} color={color} format={fmtValue} yFracAt={(i) => (vals[i] == null ? null : yf(vals[i] as number))} barMode={bars} />
+        </div>
+        <div style={{ position: 'relative', height: 15, marginTop: 7 }}>
+          {xLabels.map((l, i) => l.txt ? <div key={i} style={{ position: 'absolute', left: `${l.xf * 100}%`, transform: 'translateX(-50%)', fontSize: 10.5, fontWeight: 700, color: 'var(--ink3)', whiteSpace: 'nowrap' }}>{l.txt}</div> : null)}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ZoomModal({ w, maps, intraday, color, dist, onDist, onClose }: { w: WidgetDef; maps: Maps; intraday?: Map<string, GarminIntraday>; color: string; dist: RaceDist; onDist: (d: RaceDist) => void; onClose: () => void }) {
+  const [period, setPeriod] = useState<ZoomPeriod>('month')
   const [iDay, setIDay] = useState<string | null>(null)
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k) }, [onClose])
   const days = period === 'week' ? 7 : period === 'month' ? 30 : 365
-  const vals = buildSeries(w, maps, days)
+  const getFn = w.special === 'race' ? (r: Record<string, unknown>) => numN(r[RACE_COL[dist]]) : undefined
+  const vals = buildSeries(w, maps, days, getFn)
   const st = statsOf(vals)
-  const dots = w.special === 'vo2max' ? changeDots(vals, 900, 260, 10) : []
   const bars = w.type === 'tagesverlauf'
-  const mx = Math.max(1, ...vals.filter((v): v is number => v != null))
+  const fmtTick = (v: number) => (w.fmt ? w.fmt(v) : w.decimals != null ? v.toFixed(w.decimals) : String(Math.round(v)))
 
   // Intraday-Tagesverlauf (nur BB/Stress, nur Tage mit Kurvendaten).
   const iKey = w.intradayKey
@@ -885,7 +1057,11 @@ function ZoomModal({ w, maps, intraday, onClose }: { w: WidgetDef; maps: Maps; i
       <div onClick={(e) => e.stopPropagation()} style={{ position: 'relative', zIndex: 2, width: 960, maxWidth: '100%', borderRadius: 28, background: 'var(--glass-strong)', backdropFilter: 'blur(30px) saturate(180%)', WebkitBackdropFilter: 'blur(30px) saturate(180%)', border: '1px solid var(--border)', boxShadow: 'var(--shadow)', padding: '24px 28px', animation: 'popIn .2s ease' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ width: 40, height: 40, borderRadius: 12, display: 'grid', placeItems: 'center', fontSize: 20, background: 'var(--track)' }}>{w.icon}</div>
-          <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.5px', flex: 1 }}>{w.name}</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.5px' }}>{w.name}</div>
+            {w.special === 'race' && <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink3)', marginTop: 2 }}>Geschätzte Bestzeit über {RACE_LABEL[dist]} · aktuelle Formprognose, kein geplantes Event</div>}
+          </div>
+          {w.special === 'race' && <RaceControl dist={dist} onDist={onDist} />}
           <div style={{ display: 'flex', padding: 3, gap: 3, borderRadius: 12, background: 'var(--track)' }}>
             {(['week', 'month', 'year', 'all'] as const).map((p) => <div key={p} onClick={() => setPeriod(p)} style={{ padding: '7px 13px', borderRadius: 9, fontSize: 12.5, fontWeight: 800, cursor: 'pointer', color: period === p ? 'var(--ink)' : 'var(--ink3)', background: period === p ? 'var(--seg-active, #fff)' : 'transparent' }}>{{ week: 'Woche', month: 'Monat', year: 'Jahr', all: 'Alles' }[p]}</div>)}
           </div>
@@ -894,14 +1070,7 @@ function ZoomModal({ w, maps, intraday, onClose }: { w: WidgetDef; maps: Maps; i
 
         <div style={{ background: 'var(--card)', border: '1px solid var(--hair)', borderRadius: 18, padding: '18px 16px', marginTop: 20 }}>
           {st ? (
-            bars ? (
-              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 1, height: 260 }}>{vals.map((v, i) => <div key={i} style={{ flex: 1, height: v != null ? `${(v / mx) * 100}%` : 0, background: 'var(--accent)', opacity: 0.85, borderRadius: '2px 2px 0 0' }} />)}</div>
-            ) : (
-              <svg width="100%" height="260" viewBox="0 0 900 260" preserveAspectRatio="none" style={{ display: 'block', overflow: 'visible' }}>
-                <path d={linePathGapped(vals, 900, 260, 10)} fill="none" stroke="var(--accent)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-                {dots.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r="3.4" fill="var(--accent)" />)}
-              </svg>
-            )
+            <ZoomChart vals={vals} period={period} bars={bars} color={color} fmtValue={(v) => fmtVal(w, v)} fmtTick={fmtTick} showDots={w.special === 'vo2max'} />
           ) : <div style={{ height: 260, display: 'grid', placeItems: 'center', color: 'var(--ink3)', fontWeight: 700 }}>Keine Daten im Zeitraum.</div>}
         </div>
 
@@ -950,6 +1119,7 @@ function Trends() {
   const [catalogOpen, setCatalogOpen] = useState(false)
   const [dragIdx, setDragIdx] = useState<number | null>(null)
   const [zoom, setZoom] = useState<string | null>(null)
+  const [colorPop, setColorPop] = useState<string | null>(null)
   const [daily, setDaily] = useState<Record<string, unknown>[]>([])
   const [sleepR, setSleepR] = useState<Record<string, unknown>[]>([])
   const [scores, setScores] = useState<Record<string, unknown>[]>([])
@@ -975,9 +1145,13 @@ function Trends() {
   }), [daily, sleepR, scores])
 
   function persist(next: Layout) { setLayout(next); void api.updateSettings({ puls_trends_layout: JSON.stringify(next) }) }
-  function remove(id: string) { if (!layout) return; persist({ visible: layout.visible.filter((x) => x !== id), hidden: [id, ...layout.hidden.filter((x) => x !== id)] }) }
-  function add(id: string) { if (!layout) return; persist({ visible: [...layout.visible.filter((x) => x !== id), id], hidden: layout.hidden.filter((x) => x !== id) }) }
-  function reorder(from: number, to: number) { if (!layout || from === to) return; const v = [...layout.visible]; const [m] = v.splice(from, 1); v.splice(to, 0, m); setLayout({ visible: v, hidden: layout.hidden }) }
+  function remove(id: string) { if (!layout) return; persist({ ...layout, visible: layout.visible.filter((x) => x !== id), hidden: [id, ...layout.hidden.filter((x) => x !== id)] }) }
+  function add(id: string) { if (!layout) return; persist({ ...layout, visible: [...layout.visible.filter((x) => x !== id), id], hidden: layout.hidden.filter((x) => x !== id) }) }
+  function reorder(from: number, to: number) { if (!layout || from === to) return; const v = [...layout.visible]; const [m] = v.splice(from, 1); v.splice(to, 0, m); setLayout({ ...layout, visible: v }) }
+  function setColor(id: string, hex: string | null) { if (!layout) return; const colors = { ...layout.colors }; if (hex) colors[id] = hex; else delete colors[id]; persist({ ...layout, colors }) }
+  function setDist(id: string, dist: RaceDist) { if (!layout) return; persist({ ...layout, opts: { ...layout.opts, [id]: { ...layout.opts[id], dist } } }) }
+  const colorOf = (id: string) => layout?.colors[id] ?? 'var(--accent)'
+  const distOf = (id: string): RaceDist => layout?.opts[id]?.dist ?? '5k'
 
   if (!layout) return <div style={{ ...CARD, borderRadius: 24, padding: '48px 26px', textAlign: 'center', color: 'var(--ink3)', fontWeight: 700 }}>Lädt…</div>
   const editBtn: CSSProperties = { display: 'flex', alignItems: 'center', gap: 7, padding: '9px 15px', borderRadius: 12, fontSize: 13, fontWeight: 800, cursor: 'pointer' }
@@ -1001,16 +1175,30 @@ function Trends() {
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 18 }}>
           {layout.visible.map((id, i) => { const w = WMAP.get(id); if (!w) return null; return (
-            <div key={id} draggable={editing} onDragStart={() => setDragIdx(i)} onDragOver={(e) => { if (!editing || dragIdx === null) return; e.preventDefault(); if (dragIdx !== i) { reorder(dragIdx, i); setDragIdx(i) } }} onDragEnd={() => { setDragIdx(null); setLayout((cur) => { if (cur) void api.updateSettings({ puls_trends_layout: JSON.stringify(cur) }); return cur }) }} onClick={() => { if (!editing) setZoom(id) }} style={{ ...CARD, borderRadius: 22, padding: '18px 20px', opacity: dragIdx === i ? 0.5 : 1, cursor: editing ? 'grab' : 'pointer', outline: editing ? '1.5px dashed var(--hair)' : 'none' }}>
+            <div key={id} draggable={editing} onDragStart={() => setDragIdx(i)} onDragOver={(e) => { if (!editing || dragIdx === null) return; e.preventDefault(); if (dragIdx !== i) { reorder(dragIdx, i); setDragIdx(i) } }} onDragEnd={() => { setDragIdx(null); setLayout((cur) => { if (cur) void api.updateSettings({ puls_trends_layout: JSON.stringify(cur) }); return cur }) }} onClick={() => { if (!editing) setZoom(id) }} style={{ ...CARD, position: 'relative', borderRadius: 22, padding: '18px 20px', opacity: dragIdx === i ? 0.5 : 1, cursor: editing ? 'grab' : 'pointer', outline: editing ? '1.5px dashed var(--hair)' : 'none' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
                 <div style={{ width: 30, height: 30, borderRadius: 9, display: 'grid', placeItems: 'center', fontSize: 15, background: 'var(--track)' }}>{w.icon}</div>
                 <div style={{ fontSize: 13.5, fontWeight: 800, color: 'var(--ink)', flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{w.name}</div>
                 {editing ? (<>
+                  <div onClick={(e) => { e.stopPropagation(); setColorPop(colorPop === id ? null : id) }} title="Farbe" style={{ width: 24, height: 24, borderRadius: 7, display: 'grid', placeItems: 'center', cursor: 'pointer', background: 'var(--track)', flex: 'none' }}><div style={{ width: 13, height: 13, borderRadius: '50%', background: colorOf(id), border: '1.5px solid var(--card)', boxShadow: '0 0 0 1px var(--hair)' }} /></div>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style={{ color: 'var(--ink3)', flex: 'none' }}><circle cx="9" cy="6" r="1.6" /><circle cx="15" cy="6" r="1.6" /><circle cx="9" cy="12" r="1.6" /><circle cx="15" cy="12" r="1.6" /><circle cx="9" cy="18" r="1.6" /><circle cx="15" cy="18" r="1.6" /></svg>
                   <div onClick={(e) => { e.stopPropagation(); remove(id) }} title="Entfernen" style={{ width: 24, height: 24, borderRadius: 7, display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#E5484D', background: 'var(--track)', flex: 'none' }}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg></div>
                 </>) : <div style={{ ...kicker, fontSize: 9.5, color: 'var(--ink3)' }}>{w.type}</div>}
               </div>
-              <WidgetBody w={w} maps={maps} />
+              <WidgetBody w={w} maps={maps} color={colorOf(id)} dist={distOf(id)} onDist={(d) => setDist(id, d)} />
+              {editing && colorPop === id && (
+                <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', zIndex: 20, top: 52, right: 14, width: 194, borderRadius: 16, background: 'var(--glass-strong)', backdropFilter: 'blur(30px) saturate(180%)', WebkitBackdropFilter: 'blur(30px) saturate(180%)', border: '1px solid var(--border)', boxShadow: 'var(--shadow)', padding: 14, animation: 'popIn .15s ease' }}>
+                  <div style={{ ...kicker, fontSize: 10, marginBottom: 8 }}>Farbe</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+                    <div onClick={() => { setColor(id, null); setColorPop(null) }} title="Standard (Akzent)" style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--accent)', cursor: 'pointer', display: 'grid', placeItems: 'center', boxShadow: layout.colors[id] == null ? '0 0 0 2px var(--card), 0 0 0 4px var(--accent)' : 'none' }}>{layout.colors[id] == null && <span style={{ color: '#fff', fontSize: 13, fontWeight: 900 }}>✓</span>}</div>
+                    {WIDGET_STD_COLORS.map((c) => <div key={c} onClick={() => { setColor(id, c); setColorPop(null) }} style={{ width: 28, height: 28, borderRadius: '50%', background: c, cursor: 'pointer', boxShadow: layout.colors[id] === c ? '0 0 0 2px var(--card), 0 0 0 4px ' + c : 'none' }} />)}
+                  </div>
+                  <div style={{ ...kicker, fontSize: 10, marginBottom: 8 }}>Palette</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 6 }}>
+                    {WIDGET_PALETTE.map((c) => <div key={c} onClick={() => { setColor(id, c); setColorPop(null) }} style={{ width: 22, height: 22, borderRadius: '50%', background: c, cursor: 'pointer', boxShadow: layout.colors[id] === c ? '0 0 0 2px var(--card), 0 0 0 3px ' + c : 'none' }} />)}
+                  </div>
+                </div>
+              )}
             </div>
           ) })}
         </div>
@@ -1043,7 +1231,7 @@ function Trends() {
         </div>
       )}
 
-      {zoomW && <ZoomModal w={zoomW} maps={maps} intraday={intradayMap} onClose={() => setZoom(null)} />}
+      {zoomW && <ZoomModal w={zoomW} maps={maps} intraday={intradayMap} color={colorOf(zoomW.id)} dist={distOf(zoomW.id)} onDist={(d) => setDist(zoomW.id, d)} onClose={() => setZoom(null)} />}
     </div>
   )
 }
