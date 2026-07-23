@@ -12,13 +12,15 @@
     <string>/Users/ericschmitt/Takt-Web/garmin/launchd/run-sync.sh</string>
   </array>
 
-  <!-- 4x/Tag: 09:00 / 15:00 / 21:00 / 03:00 -->
+  <!-- 6x/Tag alle 4h ab 07:30: 07:30 / 11:30 / 15:30 / 19:30 / 23:30 / 03:30 -->
   <key>StartCalendarInterval</key>
   <array>
-    <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
-    <dict><key>Hour</key><integer>15</integer><key>Minute</key><integer>0</integer></dict>
-    <dict><key>Hour</key><integer>21</integer><key>Minute</key><integer>0</integer></dict>
-    <dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>11</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>15</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>19</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>23</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>30</integer></dict>
   </array>
 
   <!-- launchd-eigene Ausgaben (Wrapper-Start/-Fehler). Der eigentliche Sync-Log ist garmin/logs/sync.log. -->

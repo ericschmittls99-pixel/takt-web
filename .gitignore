@@ -33,6 +33,8 @@ yarn-error.log*
 garmin/venv/
 garmin/.garth/
 garmin/samples/
+# Temp-SQL-Dateien des Sync (NamedTemporaryFile; via try/finally gelöscht, Rest bei Hard-Kill)
+garmin/tmp*.sql
 # Sync-Logs (launchd): Inhalt ignorieren, Ordner via .gitkeep behalten
 garmin/logs/*
 !garmin/logs/.gitkeep
