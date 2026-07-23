@@ -266,7 +266,7 @@ export default function Puls({ theme, onBack, onOpenTodos, onOpenCalendar, onOpe
         </div>
 
         {seg === 'heute' && <Heute daily={hDaily} sleep={hSleep} scores={hScores} intraday={hIntraday} workouts={workouts} employers={employers} weekWorkouts={hWeekWorkouts} weekPlanned={hWeekPlanned} weekDates={hWeekDates} selKey={hKey} realTodayKey={todayKey} hDay={hDay} canForward={canForward} showLatest={dayKey(hDay) < dayKey(latestDay)} onPrev={() => setHeuteDay(addDays(hDay, -1))} onNext={() => { if (canForward) setHeuteDay(addDays(hDay, 1)) }} onLatest={() => setHeuteDay(null)} onOpenDaySel={(d: Date) => { if (dayKey(d) <= dayKey(latestDay)) setHeuteDay(startOfDay(d)) }} view={view} colorOf={colorOf} openWorkout={openWorkout} />}
-        {seg === 'workouts' && <Workouts workouts={workouts} employers={employers} view={view} colorOf={colorOf} openWorkout={openWorkout} areaFilter={areaFilter} setAreaFilter={setAreaFilter} rangeFilter={rangeFilter} setRangeFilter={setRangeFilter} monday={monday} />}
+        {seg === 'workouts' && <Workouts workouts={workouts} employers={employers} projects={projects} view={view} colorOf={colorOf} openWorkout={openWorkout} areaFilter={areaFilter} setAreaFilter={setAreaFilter} rangeFilter={rangeFilter} setRangeFilter={setRangeFilter} monday={monday} />}
         {seg === 'schlaf' && <Schlaf sleepRange={sleepRange} />}
         {seg === 'trends' && <Trends />}
       </div>
@@ -507,7 +507,7 @@ function Heute({ daily, sleep, scores, intraday, workouts, employers, weekWorkou
 // ─────────────────────────────────────────────────────────────────────────────
 function loadColor(v: number) { return v < 45 ? '#22C55E' : v < 72 ? '#F59E0B' : '#EF4444' }
 
-function Workouts({ workouts, employers, view, colorOf, openWorkout, areaFilter, setAreaFilter, rangeFilter, setRangeFilter, monday }: any) {
+function Workouts({ workouts, employers, projects, view, colorOf, openWorkout, areaFilter, setAreaFilter, rangeFilter, setRangeFilter, monday }: any) {
   const sportEmps: Employer[] = employers.filter((e: Employer) => e.is_sport === 1)
   // Toggle = definierte Sport-Bereiche aus Mein Tag + eigener Tab für unzugeordnete Historie.
   const segs: { val: 'all' | number | 'history'; label: string }[] = [
@@ -516,27 +516,51 @@ function Workouts({ workouts, employers, view, colorOf, openWorkout, areaFilter,
     { val: 'history', label: 'Historie (Keine Zuordnung)' },
   ]
 
+  const singleArea = typeof areaFilter === 'number' ? (areaFilter as number) : null
+  // Drilldown-Filter (steuern nur die Tabelle oben): Projekt (aus Donut/Legende) + Periode (aus Verlaufs-Balken).
+  const [projFilter, setProjFilter] = useState<number | 'none' | null>(null)
+  const [periodFilter, setPeriodFilter] = useState<{ from: Date; to: Date; label: string; key: string } | null>(null)
+  useEffect(() => { setProjFilter(null) }, [areaFilter]) // Projektfilter beim Bereichswechsel zurücksetzen
+
+  // Kanonische Kategorien mit STABILEN Farben (Legende geteilt von Donut + Verlauf).
+  // "Alle" → Bereiche (+ Historie); ein Bereich → Projekte dieses Bereichs (Schattierungen).
+  const cats = useMemo<Cat[]>(() => {
+    const base = workouts as Workout[]
+    if (singleArea != null) {
+      const areaWs = base.filter((w) => w.origin === 'entry' && w.employer_id === singleArea)
+      const tot = new Map<number | 'none', number>()
+      for (const w of areaWs) { const k = w.project_id ?? 'none'; tot.set(k, (tot.get(k) ?? 0) + (w.duration_min ?? 0)) }
+      const areaColor = colorOf(singleArea)
+      return [...tot.entries()].sort((a, b) => b[1] - a[1]).map(([pid], i) => ({ key: `p${String(pid)}`, name: pid === 'none' ? 'Ohne Projekt' : (projects.find((p: Project) => p.id === pid)?.name ?? 'Projekt'), color: hexA(areaColor, Math.max(0.5, 1 - i * 0.14)), pid, empId: null, match: (w: Workout) => w.origin === 'entry' && w.employer_id === singleArea && (pid === 'none' ? w.project_id == null : w.project_id === pid) }))
+    }
+    if (areaFilter === 'history') return [{ key: 'hist', name: 'Historie', color: HIST_GREY, pid: null, empId: null, match: (w: Workout) => w.origin === 'history' }]
+    const assigned = base.filter((w) => w.origin === 'entry' && w.employer_id != null)
+    const tot = new Map<number, number>()
+    for (const w of assigned) tot.set(w.employer_id as number, (tot.get(w.employer_id as number) ?? 0) + (w.duration_min ?? 0))
+    const list: Cat[] = [...tot.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => ({ key: `a${id}`, name: employers.find((e: Employer) => e.id === id)?.name ?? '—', color: colorOf(id), pid: null, empId: id, match: (w: Workout) => w.origin === 'entry' && w.employer_id === id }))
+    if (base.some((w) => w.origin === 'history')) list.push({ key: 'hist', name: 'Historie', color: HIST_GREY, pid: null, empId: null, match: (w: Workout) => w.origin === 'history' })
+    return list
+  }, [workouts, singleArea, areaFilter, employers, projects, colorOf])
+  const catByKey = useMemo(() => new Map(cats.map((c) => [c.key, c])), [cats])
+  const activeCatKey = projFilter != null ? `p${String(projFilter)}` : null
+  const pickCat = (key: string) => { const c = catByKey.get(key); if (!c) return; if (c.key === 'hist') { setAreaFilter('history'); return } if (singleArea != null) setProjFilter((p) => (p === c.pid ? null : (c.pid as number | 'none'))); else if (c.empId != null) setAreaFilter(c.empId) }
+  const pickPeriod = (b: { from: Date; to: Date; label: string; key: string }) => setPeriodFilter((prev) => (prev?.key === b.key ? null : b))
+
+  const rangeCut = (w: Workout): boolean => { if (rangeFilter === 'all') return true; const monthAgo = new Date(); monthAgo.setDate(monthAgo.getDate() - 30); const cut = rangeFilter === 'week' ? dayKey(monday) : dayKey(monthAgo); return dayKey(parseTs(w.start_ts)) >= cut }
+
   const filtered = useMemo(() => (workouts as Workout[]).filter((w) => {
     if (areaFilter === 'history') { if (w.origin !== 'history') return false }
     else if (areaFilter !== 'all') { if (w.employer_id !== areaFilter) return false }
-    if (rangeFilter !== 'all') { const monthAgo = new Date(); monthAgo.setDate(monthAgo.getDate() - 30); const cut = rangeFilter === 'week' ? dayKey(monday) : dayKey(monthAgo); if (dayKey(parseTs(w.start_ts)) < cut) return false }
+    if (singleArea != null && projFilter != null) { if (projFilter === 'none') { if (!(w.origin === 'entry' && w.project_id == null)) return false } else if (w.project_id !== projFilter) return false }
+    if (periodFilter) { const t = parseTs(w.start_ts).getTime(); if (t < periodFilter.from.getTime() || t >= periodFilter.to.getTime()) return false }
+    else if (!rangeCut(w)) return false
     return true
-  }), [workouts, areaFilter, rangeFilter, monday])
+  }), [workouts, areaFilter, singleArea, projFilter, periodFilter, rangeFilter, monday])
 
-  // Zeit-Kopplung: NUR zugeordnete time_entries (origin='entry'). Historie zählt hier NIE mit.
-  const areaTime = useMemo(() => {
-    const m = new Map<number, number>()
-    for (const w of filtered) { if (w.origin !== 'entry' || w.employer_id == null) continue; m.set(w.employer_id, (m.get(w.employer_id) ?? 0) + (w.duration_min ?? 0)) }
-    const max = Math.max(1, ...m.values())
-    return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([id, min]) => ({ id, name: employers.find((e: Employer) => e.id === id)?.name ?? '—', color: colorOf(id), min, w: `${(min / max) * 100}%` }))
-  }, [filtered, employers, colorOf])
-  const loadWeek = useMemo(() => {
-    const days = Array.from({ length: 7 }, (_, i) => addDays(monday, i))
-    const per = days.map((d) => filtered.filter((w) => dayKey(parseTs(w.start_ts)) === dayKey(d)).reduce((s, w) => s + (w.training_load ?? (w.duration_min ?? 0)), 0))
-    const max = Math.max(1, ...per)
-    return days.map((d, i) => ({ wd: WD[d.getDay()], v: per[i], h: `${Math.max(4, (per[i] / max) * 100)}%`, color: per[i] > 0 ? colorOf(filtered.find((w) => dayKey(parseTs(w.start_ts)) === dayKey(d))?.employer_id ?? 0) : 'var(--track)' }))
-  }, [filtered, monday, colorOf])
-
+  // Bereich-scoped (ohne Drilldown) für Donut (mit Range) und Verlauf (eigene Periode).
+  const areaScoped = useMemo(() => (workouts as Workout[]).filter((w) => (areaFilter === 'history' ? w.origin === 'history' : singleArea != null ? (w.origin === 'entry' && w.employer_id === singleArea) : true)), [workouts, areaFilter, singleArea])
+  const donutRows = useMemo(() => cats.map((c) => { const ws = areaScoped.filter((w) => rangeCut(w) && c.match(w)); return { key: c.key, name: c.name, color: c.color, min: ws.reduce((s, w) => s + (w.duration_min ?? 0), 0), count: ws.length } }).filter((r) => r.min > 0 && (r.key !== 'hist' || areaFilter === 'history')), [cats, areaScoped, rangeFilter, monday, areaFilter])
+  const donutTitle = singleArea != null ? `Trainingszeit pro Projekt · ${employers.find((e: Employer) => e.id === singleArea)?.name ?? ''}` : areaFilter === 'history' ? 'Trainingszeit · Historie' : 'Trainingszeit pro Bereich'
   // Native <select> darf KEIN display:flex haben (bricht das Rendering) — eigener Stil.
   const selBtn: CSSProperties = { ...GLASS, display: 'inline-block', padding: '9px 30px 9px 14px', borderRadius: 12, fontSize: 13, fontWeight: 800, color: 'var(--ink2)', cursor: 'pointer', appearance: 'none', WebkitAppearance: 'none', fontFamily: 'inherit', outline: 'none', maxWidth: '100%' }
   const cols = '2.4fr 0.9fr 0.9fr 0.9fr 0.9fr 0.8fr'
@@ -557,6 +581,26 @@ function Workouts({ workouts, employers, view, colorOf, openWorkout, areaFilter,
           <option value="all">Alle</option>
         </select>
       </div>
+
+      {/* aktive Drilldown-Filter (aus Donut/Legende bzw. Verlaufs-Balken) */}
+      {(periodFilter || projFilter != null) && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+          {projFilter != null && (() => { const c = catByKey.get(`p${String(projFilter)}`); return (
+            <div onClick={() => setProjFilter(null)} title="Projektfilter entfernen" style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 11px', borderRadius: 10, cursor: 'pointer', background: 'color-mix(in srgb, var(--accent) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--accent) 32%, transparent)' }}>
+              <div style={{ width: 9, height: 9, borderRadius: '50%', background: c?.color ?? 'var(--accent)', flex: 'none' }} />
+              <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--ink)' }}>{c?.name ?? 'Projekt'}</div>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--ink3)" strokeWidth="2.8" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+            </div>
+          ) })()}
+          {periodFilter && (
+            <div onClick={() => setPeriodFilter(null)} title="Zeitraumfilter entfernen" style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 11px', borderRadius: 10, cursor: 'pointer', background: 'color-mix(in srgb, var(--accent) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--accent) 32%, transparent)' }}>
+              <span style={{ fontSize: 12 }}>📅</span>
+              <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--ink)' }}>{periodFilter.label}</div>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--ink3)" strokeWidth="2.8" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Tabelle */}
       <div style={{ ...CARD, borderRadius: 24, overflow: 'hidden' }}>
@@ -589,32 +633,161 @@ function Workouts({ workouts, employers, view, colorOf, openWorkout, areaFilter,
         </div>
       </div>
 
-      {/* Zeit-Kopplung */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 18, marginTop: 18 }}>
-        <div style={{ ...CARD, borderRadius: 24, padding: '22px 24px' }}>
-          <div style={kicker}>Trainingszeit pro Bereich</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 20 }}>
-            {areaTime.length === 0 && <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink3)' }}>Keine Daten.</div>}
-            {areaTime.map((a: any) => (
-              <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                <div style={{ width: 72, display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 9, height: 9, borderRadius: '50%', background: a.color }} /><div style={{ fontSize: 13, fontWeight: 800 }}>{a.name}</div></div>
-                <div style={{ flex: 1, height: 12, borderRadius: 99, background: 'var(--track)', overflow: 'hidden' }}><div style={{ height: '100%', width: a.w, background: a.color, borderRadius: 99 }} /></div>
-                <div style={{ width: 56, textAlign: 'right', fontSize: 13.5, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{fmtDur(a.min)}</div>
-              </div>
-            ))}
+      {/* Zeit-Kopplung: Donut (Gesamtzeiten pro Bereich/Projekt, 5-1) links + Workout-Verlauf-Balken rechts */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 32%) 1fr', gap: 18, marginTop: 18, alignItems: 'stretch' }}>
+        <div style={{ ...CARD, borderRadius: 24, padding: '22px 24px', alignSelf: 'start' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <div style={kicker}>{donutTitle}</div>
+            <div style={{ flex: 1 }} />
+            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 10 }}>
+              {donutRows.map((a) => { const on = activeCatKey === a.key; return (
+                <div key={a.key} onClick={() => pickCat(a.key)} title={`Nach ${a.name} filtern`} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', opacity: activeCatKey && !on ? 0.5 : 1 }}>
+                  <div style={{ width: 9, height: 9, borderRadius: '50%', background: a.color, flex: 'none' }} />
+                  <div style={{ fontSize: 12, fontWeight: 800, color: on ? 'var(--ink)' : 'var(--ink2)', whiteSpace: 'nowrap' }}>{a.name}</div>
+                </div>
+              ) })}
+            </div>
           </div>
+          {donutRows.length === 0 ? (
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink3)', marginTop: 20 }}>Keine Daten.</div>
+          ) : (
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 18 }}>
+              <Donut rows={donutRows} onPick={pickCat} activeKey={activeCatKey} />
+            </div>
+          )}
         </div>
-        <div style={{ ...CARD, borderRadius: 24, padding: '22px 24px' }}>
-          <div style={kicker}>Wochenlast-Verlauf</div>
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, height: 130, marginTop: 18 }}>
-            {loadWeek.map((d: any, i: number) => (
-              <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, height: '100%', justifyContent: 'flex-end' }}>
-                <div style={{ width: '100%', maxWidth: 42, height: d.h, background: d.color, borderRadius: '9px 9px 5px 5px' }} />
-                <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--ink2)' }}>{d.wd}</div>
+
+        {/* Workout-Verlauf: navigierbar, gestapelt (stabile Farben/Legende), Balken-Klick filtert oben nach Periode */}
+        <WorkoutHistory workouts={areaScoped} cats={cats} onPickPeriod={pickPeriod} activePeriodKey={periodFilter?.key ?? null} />
+      </div>
+    </div>
+  )
+}
+
+// ── Workout-Verlauf-Widget (5-x): Perioden-Navigation + gestapelte Balken + Klick-Liste ──
+type HistBucket = { from: Date; to: Date; key: string; xlabel: string }
+function histBuckets(pmode: 'week' | 'month' | 'year', anchor: Date): { buckets: HistBucket[]; label: string } {
+  if (pmode === 'week') {
+    const mon = addDays(startOfDay(anchor), -((anchor.getDay() + 6) % 7))
+    const buckets = Array.from({ length: 7 }, (_, i) => { const from = addDays(mon, i); return { from, to: addDays(from, 1), key: dayKey(from), xlabel: WD[from.getDay()] } })
+    const d0 = buckets[0].from, d6 = buckets[6].from
+    const label = d0.getMonth() === d6.getMonth() ? `${d0.getDate()}.–${d6.getDate()}. ${MONTHS_SHORT[d6.getMonth()]}` : `${d0.getDate()}. ${MONTHS_SHORT[d0.getMonth()]} – ${d6.getDate()}. ${MONTHS_SHORT[d6.getMonth()]}`
+    return { buckets, label }
+  }
+  if (pmode === 'month') {
+    const y = anchor.getFullYear(), m = anchor.getMonth(), days = new Date(y, m + 1, 0).getDate()
+    const buckets = Array.from({ length: days }, (_, i) => { const from = new Date(y, m, i + 1); return { from, to: new Date(y, m, i + 2), key: dayKey(from), xlabel: String(i + 1) } })
+    return { buckets, label: anchor.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' }) }
+  }
+  const y = anchor.getFullYear()
+  const buckets = Array.from({ length: 12 }, (_, i) => ({ from: new Date(y, i, 1), to: new Date(y, i + 1, 1), key: `${y}-${i}`, xlabel: MONTHS_SHORT[i] }))
+  return { buckets, label: String(y) }
+}
+function histShift(pmode: 'week' | 'month' | 'year', anchor: Date, dir: number): Date {
+  if (pmode === 'week') return addDays(anchor, dir * 7)
+  if (pmode === 'month') return new Date(anchor.getFullYear(), anchor.getMonth() + dir, 1)
+  return new Date(anchor.getFullYear() + dir, anchor.getMonth(), 1)
+}
+const HIST_GREY = '#94A3B8'
+// Kategorie mit stabiler Farbe/Match (aus Workouts durchgereicht an Verlauf + Donut).
+type Cat = { key: string; name: string; color: string; pid: number | 'none' | null; empId: number | null; match: (w: Workout) => boolean }
+
+// Donut der Gesamtzeiten (pro Bereich bzw. pro Projekt). Mitte = Summe; Segment-Hover zeigt Anzahl + Zeit; Klick filtert.
+type DonutRow = { key: string; name: string; color: string; min: number; count?: number }
+function Donut({ rows, onPick, activeKey }: { rows: DonutRow[]; onPick?: (k: string) => void; activeKey?: string | null }) {
+  const [hi, setHi] = useState<string | null>(null)
+  const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const total = rows.reduce((s, r) => s + r.min, 0)
+  const size = 176, sw = 30, R = size / 2, r = R - sw / 2, circ = 2 * Math.PI * r
+  if (total <= 0) return <div style={{ height: size, display: 'grid', placeItems: 'center', color: 'var(--ink3)', fontWeight: 700, fontSize: 13 }}>Keine Daten.</div>
+  const hiRow = rows.find((x) => x.key === hi) || null
+  const onMove = (e: { clientX: number; clientY: number }) => { const el = wrapRef.current; if (!el) return; const b = el.getBoundingClientRect(); setPos({ x: e.clientX - b.left, y: e.clientY - b.top }) }
+  let acc = 0
+  return (
+    <div ref={wrapRef} onMouseMove={onMove} onMouseLeave={() => setHi(null)} style={{ position: 'relative', width: size, height: size, flex: 'none' }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle cx={R} cy={R} r={r} fill="none" stroke="var(--track)" strokeWidth={sw} />
+        <g transform={`rotate(-90 ${R} ${R})`}>
+          {rows.map((seg) => { const dash = (seg.min / total) * circ; const dim = (!!activeKey && activeKey !== seg.key) || (!!hi && hi !== seg.key); const el = <circle key={seg.key} onMouseEnter={() => setHi(seg.key)} onClick={onPick ? () => onPick(seg.key) : undefined} cx={R} cy={R} r={r} fill="none" stroke={seg.color} strokeWidth={sw} strokeDasharray={`${dash} ${circ - dash}`} strokeDashoffset={-acc} opacity={dim ? 0.4 : 1} style={{ cursor: onPick ? 'pointer' : 'default' }} />; acc += dash; return el })}
+        </g>
+        <text x={R} y={R - 2} textAnchor="middle" fill="var(--ink)" style={{ fontSize: 21, fontWeight: 800 }}>{fmtDur(total)}</text>
+        <text x={R} y={R + 16} textAnchor="middle" fill="var(--ink3)" style={{ fontSize: 10, fontWeight: 800, letterSpacing: '1.4px' }}>GESAMT</text>
+      </svg>
+      {hiRow && (
+        <div style={{ position: 'absolute', left: pos.x, top: pos.y, transform: 'translate(-50%, calc(-100% - 8px))', pointerEvents: 'none', zIndex: 6, background: 'var(--glass-strong, var(--card))', border: '1px solid var(--border)', borderRadius: 9, padding: '5px 9px', boxShadow: '0 8px 22px -12px rgba(0,0,0,0.5)', whiteSpace: 'nowrap' }}>
+          <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--ink)' }}>{hiRow.name}</div>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--ink3)', marginTop: 1 }}>{hiRow.count ?? 0} {hiRow.count === 1 ? 'Workout' : 'Workouts'} · {fmtDur(hiRow.min)}</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function WorkoutHistory({ workouts, cats, onPickPeriod, activePeriodKey }: any) {
+  const [pmode, setPmode] = useState<'week' | 'month' | 'year'>('week')
+  const [anchor, setAnchor] = useState<Date>(() => startOfDay(new Date()))
+  const [hover, setHover] = useState<number | null>(null)
+  const cs: Cat[] = cats
+
+  const { buckets, label } = useMemo(() => histBuckets(pmode, anchor), [pmode, anchor])
+  const data = useMemo(() => buckets.map((b) => {
+    const ws = (workouts as Workout[]).filter((w) => { const t = parseTs(w.start_ts).getTime(); return t >= b.from.getTime() && t < b.to.getTime() })
+    const totalMin = ws.reduce((s, w) => s + (w.duration_min ?? 0), 0)
+    const segs = cs.map((c) => ({ key: c.key, name: c.name, color: c.color, min: ws.filter(c.match).reduce((s, w) => s + (w.duration_min ?? 0), 0) })).filter((s) => s.min > 0)
+    const plabel = pmode === 'year' ? `${MONTHS_SHORT[b.from.getMonth()]} ${b.from.getFullYear()}` : `${WD[b.from.getDay()]}, ${b.from.getDate()}. ${MONTHS_SHORT[b.from.getMonth()]}`
+    return { ...b, totalMin, count: ws.length, segs, plabel }
+  }), [buckets, workouts, cs, pmode])
+
+  const maxMin = Math.max(1, ...data.map((d) => d.totalMin))
+  const grandTotal = data.reduce((s, d) => s + d.totalMin, 0)
+  const canNext = buckets[buckets.length - 1].to.getTime() <= Date.now()
+  const go = (dir: number) => { if (dir > 0 && !canNext) return; setAnchor((a) => histShift(pmode, a, dir)) }
+  // Wisch-/Drag-Navigation über dem Balkenbereich (rechts = zurück, links = weiter).
+  const drag = useRef<{ x0: number; swiped: boolean }>({ x0: 0, swiped: false })
+  const onDown = (e: { clientX: number }) => { drag.current = { x0: e.clientX, swiped: false } }
+  const onUp = (e: { clientX: number }) => { const dx = e.clientX - drag.current.x0; if (Math.abs(dx) > 40) { drag.current.swiped = true; go(dx > 0 ? -1 : 1) } }
+  const nav = (on: boolean): CSSProperties => ({ width: 32, height: 32, borderRadius: 10, background: 'var(--track)', display: 'grid', placeItems: 'center', cursor: on ? 'pointer' : 'default', opacity: on ? 1 : 0.35, fontSize: 17, fontWeight: 700, color: 'var(--ink2)' })
+
+  return (
+    <div style={{ ...CARD, borderRadius: 24, padding: '22px 24px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
+        <div style={kicker}>Workout-Verlauf</div>
+        <div style={{ flex: 1 }} />
+        <div onClick={() => go(-1)} title="Zurück" style={nav(true)}>‹</div>
+        <div style={{ fontSize: 13.5, fontWeight: 800, minWidth: 118, textAlign: 'center' }}>{label}</div>
+        <div onClick={() => go(1)} title={canNext ? 'Weiter' : 'Kein späterer Zeitraum'} style={nav(canNext)}>›</div>
+        <div style={{ display: 'flex', padding: 3, gap: 3, borderRadius: 12, background: 'var(--track)', marginLeft: 4 }}>
+          {(['week', 'month', 'year'] as const).map((p) => <div key={p} onClick={() => setPmode(p)} style={{ padding: '6px 12px', borderRadius: 9, fontSize: 12.5, fontWeight: 800, cursor: 'pointer', color: pmode === p ? 'var(--ink)' : 'var(--ink3)', background: pmode === p ? 'var(--seg-active, #fff)' : 'transparent' }}>{{ week: 'Woche', month: 'Monat', year: 'Jahr' }[p]}</div>)}
+        </div>
+      </div>
+
+      <div onPointerDown={onDown} onPointerUp={onUp} style={{ touchAction: 'pan-y', userSelect: 'none', cursor: 'grab' }}>
+      {grandTotal === 0 ? (
+        <div style={{ height: 150, display: 'grid', placeItems: 'center', color: 'var(--ink3)', fontWeight: 700, fontSize: 13.5 }}>Keine Workouts in diesem Zeitraum.</div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: pmode === 'month' ? 3 : 8, height: 150 }}>
+          {data.map((d, i) => {
+            const hBar = (d.totalMin / maxMin) * 100
+            const showLbl = pmode === 'month' ? i % 5 === 0 : true
+            const active = activePeriodKey === d.key
+            return (
+              <div key={d.key} onClick={() => { if (drag.current.swiped) { drag.current.swiped = false; return } if (d.count > 0) onPickPeriod({ from: d.from, to: d.to, label: d.plabel, key: d.key }) }} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover((h) => (h === i ? null : h))} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, height: '100%', justifyContent: 'flex-end', cursor: d.count > 0 ? 'pointer' : 'default', position: 'relative' }}>
+                {hover === i && d.count > 0 && (
+                  <div style={{ position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)', zIndex: 5, pointerEvents: 'none', background: 'var(--glass-strong, var(--card))', border: '1px solid var(--border)', borderRadius: 9, padding: '5px 9px', boxShadow: '0 8px 22px -12px rgba(0,0,0,0.5)', whiteSpace: 'nowrap' }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--ink)' }}>{d.count} {d.count === 1 ? 'Workout' : 'Workouts'}</div>
+                    <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--ink3)', marginTop: 1 }}>{fmtDur(d.totalMin)}</div>
+                  </div>
+                )}
+                <div style={{ width: '100%', maxWidth: 42, height: `${hBar}%`, minHeight: d.totalMin > 0 ? 4 : 0, borderRadius: '8px 8px 3px 3px', overflow: 'hidden', display: 'flex', flexDirection: 'column-reverse', background: 'var(--track)', outline: active ? `2px solid ${d.segs[0]?.color ?? 'var(--accent)'}` : 'none', outlineOffset: 1 }}>
+                  {d.segs.map((s) => <div key={s.key} title={`${s.name}: ${fmtDur(s.min)}`} style={{ height: `${(s.min / d.totalMin) * 100}%`, background: s.color }} />)}
+                </div>
+                <div style={{ fontSize: pmode === 'month' ? 9 : 11, fontWeight: 800, color: 'var(--ink3)', height: 12 }}>{showLbl ? d.xlabel : ''}</div>
               </div>
-            ))}
-          </div>
+            )
+          })}
         </div>
+      )}
       </div>
     </div>
   )
