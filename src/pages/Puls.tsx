@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { api, type AppSettings, type Employer, type GarminDaily, type GarminIntraday, type GarminScores, type GarminSleep, type IntradayPoint, type PlannedBlock, type PlannedOverride, type Project, type Workout } from '../api'
 import { employerColor } from '../colors'
 import { holidayName } from '../holidays'
@@ -1564,6 +1565,7 @@ function Trends() {
   const [dragIdx, setDragIdx] = useState<number | null>(null)
   const [zoom, setZoom] = useState<string | null>(null)
   const [colorPop, setColorPop] = useState<string | null>(null)
+  const [colorPopRect, setColorPopRect] = useState<DOMRect | null>(null)
   const [daily, setDaily] = useState<Record<string, unknown>[]>([])
   const [sleepR, setSleepR] = useState<Record<string, unknown>[]>([])
   const [scores, setScores] = useState<Record<string, unknown>[]>([])
@@ -1632,25 +1634,40 @@ function Trends() {
                 <div style={{ width: 30, height: 30, borderRadius: 9, display: 'grid', placeItems: 'center', fontSize: 15, background: 'var(--track)' }}>{w.icon}</div>
                 <div style={{ fontSize: 13.5, fontWeight: 800, color: 'var(--ink)', flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{w.name}</div>
                 {editing ? (<>
-                  <div onClick={(e) => { e.stopPropagation(); setColorPop(colorPop === id ? null : id) }} title="Farbe" style={{ width: 24, height: 24, borderRadius: 7, display: 'grid', placeItems: 'center', cursor: 'pointer', background: 'var(--track)', flex: 'none' }}><div style={{ width: 13, height: 13, borderRadius: '50%', background: colorOf(id), border: '1.5px solid var(--card)', boxShadow: '0 0 0 1px var(--hair)' }} /></div>
+                  <div onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setColorPopRect(r); setColorPop(colorPop === id ? null : id) }} title="Farbe" style={{ width: 24, height: 24, borderRadius: 7, display: 'grid', placeItems: 'center', cursor: 'pointer', background: 'var(--track)', flex: 'none' }}><div style={{ width: 13, height: 13, borderRadius: '50%', background: colorOf(id), border: '1.5px solid var(--card)', boxShadow: '0 0 0 1px var(--hair)' }} /></div>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style={{ color: 'var(--ink3)', flex: 'none' }}><circle cx="9" cy="6" r="1.6" /><circle cx="15" cy="6" r="1.6" /><circle cx="9" cy="12" r="1.6" /><circle cx="15" cy="12" r="1.6" /><circle cx="9" cy="18" r="1.6" /><circle cx="15" cy="18" r="1.6" /></svg>
                   <div onClick={(e) => { e.stopPropagation(); remove(id) }} title="Entfernen" style={{ width: 24, height: 24, borderRadius: 7, display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#E5484D', background: 'var(--track)', flex: 'none' }}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg></div>
                 </>) : <div style={{ ...kicker, fontSize: 9.5, color: 'var(--ink3)' }}>{w.type}</div>}
               </div>
               <WidgetBody w={w} maps={maps} color={colorOf(id)} dist={distOf(id)} onDist={(d) => setDist(id, d)} />
-              {editing && colorPop === id && (
-                <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', zIndex: 20, top: 52, right: 14, width: 194, borderRadius: 16, background: 'var(--glass-strong)', backdropFilter: 'blur(30px) saturate(180%)', WebkitBackdropFilter: 'blur(30px) saturate(180%)', border: '1px solid var(--border)', boxShadow: 'var(--shadow)', padding: 14, animation: 'popIn .15s ease' }}>
-                  <div style={{ ...kicker, fontSize: 10, marginBottom: 8 }}>Farbe</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
-                    <div onClick={() => { setColor(id, null); setColorPop(null) }} title="Standard (Akzent)" style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--accent)', cursor: 'pointer', display: 'grid', placeItems: 'center', boxShadow: layout.colors[id] == null ? '0 0 0 2px var(--card), 0 0 0 4px var(--accent)' : 'none' }}>{layout.colors[id] == null && <span style={{ color: '#fff', fontSize: 13, fontWeight: 900 }}>✓</span>}</div>
-                    {WIDGET_STD_COLORS.map((c) => <div key={c} onClick={() => { setColor(id, c); setColorPop(null) }} style={{ width: 28, height: 28, borderRadius: '50%', background: c, cursor: 'pointer', boxShadow: layout.colors[id] === c ? '0 0 0 2px var(--card), 0 0 0 4px ' + c : 'none' }} />)}
-                  </div>
-                  <div style={{ ...kicker, fontSize: 10, marginBottom: 8 }}>Palette</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 6 }}>
-                    {WIDGET_PALETTE.map((c) => <div key={c} onClick={() => { setColor(id, c); setColorPop(null) }} style={{ width: 22, height: 22, borderRadius: '50%', background: c, cursor: 'pointer', boxShadow: layout.colors[id] === c ? '0 0 0 2px var(--card), 0 0 0 3px ' + c : 'none' }} />)}
-                  </div>
-                </div>
-              )}
+              {editing && colorPop === id && colorPopRect && createPortal((() => {
+                const W = 210, estH = 200
+                const up = colorPopRect.bottom + estH > window.innerHeight - 8
+                const left = Math.max(8, Math.min(window.innerWidth - W - 8, colorPopRect.right - W))
+                const vpos: CSSProperties = up ? { bottom: window.innerHeight - colorPopRect.top + 6 } : { top: colorPopRect.bottom + 6 }
+                return (
+                  <>
+                    <div onClick={() => setColorPop(null)} style={{ position: 'fixed', inset: 0, zIndex: 400 }} />
+                    <div onClick={(e) => e.stopPropagation()} className="no-scrollbar" style={{ position: 'fixed', left, ...vpos, zIndex: 401, width: W, maxHeight: 'min(60vh, 340px)', overflowY: 'auto', borderRadius: 16, background: 'var(--glass-strong)', backdropFilter: 'blur(30px) saturate(180%)', WebkitBackdropFilter: 'blur(30px) saturate(180%)', border: '1px solid var(--border)', boxShadow: 'var(--shadow)', padding: 14, animation: 'popIn .15s ease' }}>
+                      <div style={{ ...kicker, fontSize: 10, marginBottom: 8 }}>Farbe</div>
+                      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                        <div onClick={() => { setColor(id, null); setColorPop(null) }} title="Standard (Akzent)" style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--accent)', cursor: 'pointer', display: 'grid', placeItems: 'center', boxShadow: layout.colors[id] == null ? '0 0 0 2px var(--card), 0 0 0 4px var(--accent)' : 'none' }}>{layout.colors[id] == null && <span style={{ color: '#fff', fontSize: 13, fontWeight: 900 }}>✓</span>}</div>
+                        {WIDGET_STD_COLORS.map((c) => <div key={c} onClick={() => { setColor(id, c); setColorPop(null) }} style={{ width: 28, height: 28, borderRadius: '50%', background: c, cursor: 'pointer', boxShadow: layout.colors[id] === c ? '0 0 0 2px var(--card), 0 0 0 4px ' + c : 'none' }} />)}
+                      </div>
+                      <div style={{ ...kicker, fontSize: 10, marginBottom: 8 }}>Palette</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 8, justifyItems: 'center' }}>
+                        {WIDGET_PALETTE.map((c) => <div key={c} onClick={() => { setColor(id, c); setColorPop(null) }} style={{ width: 24, height: 24, borderRadius: '50%', background: c, cursor: 'pointer', boxShadow: layout.colors[id] === c ? '0 0 0 2px var(--card), 0 0 0 3px ' + c : 'none' }} />)}
+                      </div>
+                      {(() => { const isDefault = layout.colors[id] == null; return (
+                        <div onClick={() => { if (!isDefault) { setColor(id, null); setColorPop(null) } }} title="Systemweite Akzentfarbe aus Verwalten" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 12, padding: '8px 10px', borderRadius: 10, cursor: isDefault ? 'default' : 'pointer', background: 'var(--track)', fontSize: 12.5, fontWeight: 800, color: isDefault ? 'var(--ink3)' : 'var(--ink2)', opacity: isDefault ? 0.6 : 1 }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /></svg>
+                          {isDefault ? 'Nutzt Akzentfarbe' : 'Auf Akzentfarbe zurücksetzen'}
+                        </div>
+                      ) })()}
+                    </div>
+                  </>
+                )
+              })(), document.body)}
             </div>
           ) })}
         </div>

@@ -355,7 +355,7 @@ export default function ActivityDeepDive({ activityId, employers, projects, onCl
               </div>
             ) : kpis.length > 0 && (
               <div style={{ padding: '22px 28px 6px' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(kpis.length, 6)}, 1fr)`, gap: 12 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 12 }}>
                   {kpis.map((k, i) => (
                     <div key={i} style={{ background: 'var(--card)', border: '1px solid var(--hair)', borderRadius: 16, padding: '14px 15px' }}>
                       <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
@@ -432,7 +432,7 @@ export default function ActivityDeepDive({ activityId, employers, projects, onCl
             {hasPower && (
               <div style={{ padding: '4px 28px 20px' }}>
                 <div style={{ ...kicker, marginBottom: 12 }}>Leistung (Power)</div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 12 }}>
                   {powerKpis.map((k, i) => (
                     <div key={i} style={{ background: 'var(--card)', border: '1px solid var(--hair)', borderRadius: 16, padding: '14px 15px' }}>
                       <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
