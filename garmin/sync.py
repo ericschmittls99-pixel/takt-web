@@ -184,7 +184,9 @@ def g(d: dict, *keys):
     return None
 
 
-ACT_MEASURE = ["start_ts", "type", "name", "duration_sec", "distance_m", "calories",
+# "name" bewusst NICHT in den Update-Spalten: wird nur beim Insert gesetzt, damit
+# manuell angepasste Titel (Rename im Deep-Dive) beim Re-Sync erhalten bleiben.
+ACT_MEASURE = ["start_ts", "type", "duration_sec", "distance_m", "calories",
                "avg_hr", "max_hr", "elevation_gain_m", "training_load", "aerobic_te",
                "anaerobic_te", "moderate_min", "vigorous_min", "vo2max",
                "total_reps", "total_sets",
@@ -367,13 +369,19 @@ def map_dailystress(data: dict) -> tuple[list | None, list | None]:
     return bb, st
 
 
-def build_activity_detail_payload(a: dict, detail: dict | None) -> dict:
+def build_activity_detail_payload(a: dict, detail: dict | None, laps: list | None = None) -> dict:
     hz = {f"z{i}": a.get(f"hrTimeInZone_{i}") for i in range(1, 6)}
     series, gps = sample_series(detail) if detail else ({}, None)
+    # Per-km-Laps (Garmin "Laps") bevorzugen — das sind die Zeiten pro Kilometer.
+    # Fallback: splitSummaries (aggregierte Split-Typen, nicht pro km).
+    lap_splits = None
+    if laps:
+        lap_splits = [{"distance": l.get("distance"), "duration": l.get("duration")}
+                      for l in laps if l.get("distance") and l.get("duration")] or None
     payload = {
         "hr_curve": build_hr_curve(detail) if detail else [],
         "hr_zones_sec": {k: v for k, v in hz.items() if v is not None},
-        "splits": a.get("splitSummaries"),
+        "splits": lap_splits if lap_splits else a.get("splitSummaries"),
         "exercise_sets": convert_exercise_sets(a.get("summarizedExerciseSets")),
         "series": series,
         "gps": gps,
@@ -493,7 +501,15 @@ def sync_activities(days: int, stmts: list[str], summary: dict) -> None:
                                params={"maxChartSize": 200, "maxPolylineSize": 0})
         except Exception as e:  # noqa: BLE001
             warn(f"Detail für Aktivität {gid} fehlgeschlagen: {e}")
-        payload = build_activity_detail_payload(a, detail)
+        # Per-km-Laps nur für Distanz-Aktivitäten (Lauf/Rad/…); eigener Endpunkt (lapDTOs).
+        laps = None
+        if a.get("distance"):
+            try:
+                lp = api_retry(f"/activity-service/activity/{a['activityId']}/splits")
+                laps = lp.get("lapDTOs") if isinstance(lp, dict) else None
+            except Exception as e:  # noqa: BLE001
+                warn(f"Laps für Aktivität {gid} fehlgeschlagen: {e}")
+        payload = build_activity_detail_payload(a, detail, laps)
         stmts.append(
             f"INSERT INTO activity_details (activity_id, payload) "
             f"SELECT id, {qj(payload)} FROM activities WHERE garmin_activity_id={q(gid)} "

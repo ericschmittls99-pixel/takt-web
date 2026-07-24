@@ -119,7 +119,7 @@ export interface ActivityDetailPayload {
   splits?: Record<string, unknown>[]
   exercise_sets?: Record<string, unknown>[]
   series?: { hr?: (number | null)[]; cadence?: (number | null)[]; speed?: (number | null)[]; elevation?: (number | null)[]; power?: (number | null)[] }
-  gps?: [number, number][] | null
+  gps?: [number, number][] | null // gespeichert als [lat, lng] (Sync); für MapLibre auf [lng, lat] swappen
   temp?: { min: number | null; max: number | null } | null
 }
 export interface GarminActivityDetail extends GarminActivity {
@@ -511,6 +511,9 @@ export const api = {
 
   getGarminActivity: (id: number) => request<GarminActivityDetail>(`/api/garmin/activities/${id}`),
 
+  // Karten-Konfig (MapTiler-Key zur Laufzeit; key === '' → nicht konfiguriert)
+  getMapConfig: () => request<{ key: string }>('/api/map'),
+
   editGarminActivity: (id: number, fields: ActivityEdit) =>
     request<GarminActivity>(`/api/garmin/activities/${id}`, {
       method: 'PATCH',
@@ -521,6 +524,13 @@ export const api = {
     request<GarminActivity>(`/api/garmin/activities/${id}`, {
       method: 'PATCH',
       body: JSON.stringify({ action: 'edit-exercises', exercises }),
+    }),
+
+  // Titel jeder Aktivität ändern (kosmetisch; überlebt Re-Sync)
+  renameGarminActivity: (id: number, name: string) =>
+    request<GarminActivity>(`/api/garmin/activities/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ action: 'rename', name }),
     }),
 
   getGarminSuggestion: (activityId: number) =>

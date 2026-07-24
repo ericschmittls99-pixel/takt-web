@@ -52,10 +52,34 @@ function hexA(hex: string, a: number) {
   if (h.length !== 6) return `color-mix(in srgb, ${hex} ${Math.round(a * 100)}%, transparent)`
   return `rgba(${parseInt(h.slice(0, 2), 16)},${parseInt(h.slice(2, 4), 16)},${parseInt(h.slice(4, 6), 16)},${a})`
 }
+// Monotone kubische Interpolation (Fritsch–Carlson, wie d3.curveMonotoneX):
+// rundet weich, überschwingt aber NIE über die Datenpunkte hinaus → präziser, ruhiger Linienlook.
+function monotoneD(pts: { x: number; y: number }[]): string {
+  const n = pts.length
+  if (n === 0) return ''
+  if (n === 1) return `M${pts[0].x.toFixed(2)} ${pts[0].y.toFixed(2)}`
+  if (n === 2) return `M${pts[0].x.toFixed(2)} ${pts[0].y.toFixed(2)} L${pts[1].x.toFixed(2)} ${pts[1].y.toFixed(2)}`
+  const dx: number[] = [], m: number[] = []
+  for (let i = 0; i < n - 1; i++) { const hx = pts[i + 1].x - pts[i].x; dx.push(hx); m.push(hx !== 0 ? (pts[i + 1].y - pts[i].y) / hx : 0) }
+  const t: number[] = new Array(n)
+  t[0] = m[0]; t[n - 1] = m[n - 2]
+  for (let i = 1; i < n - 1; i++) t[i] = m[i - 1] * m[i] <= 0 ? 0 : (m[i - 1] + m[i]) / 2
+  for (let i = 0; i < n - 1; i++) {
+    if (m[i] === 0) { t[i] = 0; t[i + 1] = 0; continue }
+    const a = t[i] / m[i], b = t[i + 1] / m[i], s = a * a + b * b
+    if (s > 9) { const tau = 3 / Math.sqrt(s); t[i] = tau * a * m[i]; t[i + 1] = tau * b * m[i] }
+  }
+  let d = `M${pts[0].x.toFixed(2)} ${pts[0].y.toFixed(2)}`
+  for (let i = 0; i < n - 1; i++) {
+    const h3 = dx[i] / 3
+    d += ` C${(pts[i].x + h3).toFixed(2)} ${(pts[i].y + t[i] * h3).toFixed(2)} ${(pts[i + 1].x - h3).toFixed(2)} ${(pts[i + 1].y - t[i + 1] * h3).toFixed(2)} ${pts[i + 1].x.toFixed(2)} ${pts[i + 1].y.toFixed(2)}`
+  }
+  return d
+}
 function sparkPath(vals: number[], w: number, h: number, p = 3): string {
   if (vals.length < 2) return ''
   const mn = Math.min(...vals), mx = Math.max(...vals), r = mx - mn || 1, sx = w / (vals.length - 1)
-  return vals.map((v, i) => `${i ? 'L' : 'M'}${(i * sx).toFixed(1)} ${(p + (h - 2 * p) - ((v - mn) / r) * (h - 2 * p)).toFixed(1)}`).join(' ')
+  return monotoneD(vals.map((v, i) => ({ x: i * sx, y: p + (h - 2 * p) - ((v - mn) / r) * (h - 2 * p) })))
 }
 // ── Chart-Hover (Welle 4-1): Tooltip + Führungslinie + Punkt über beliebigen Kurven ──
 type HoverPoint = { v: number | null; label: string }
@@ -130,7 +154,7 @@ const CARD: CSSProperties = { background: 'var(--card)', backdropFilter: 'blur(2
 const kicker: CSSProperties = { fontSize: 11, fontWeight: 800, letterSpacing: '1.4px', textTransform: 'uppercase', color: 'var(--ink3)' }
 const iconBtn: CSSProperties = { width: 40, height: 40, borderRadius: '50%', ...GLASS, display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--ink2)' }
 
-type Seg = 'heute' | 'workouts' | 'schlaf' | 'trends'
+type Seg = 'heute' | 'workouts' | 'schlaf' | 'body' | 'trends'
 
 // Planblöcke eines Tages auflösen (Standardwoche + Overrides), analog Mein Tag.
 function resolvePlanned(planned: PlannedBlock[], overrides: PlannedOverride[], date: Date, bundesland: string) {
@@ -229,7 +253,7 @@ export default function Puls({ theme, onBack, onOpenTodos, onOpenCalendar, onOpe
   const seg1: CSSProperties = { padding: '9px 18px', borderRadius: 12, cursor: 'pointer', fontSize: 14, fontWeight: 800, letterSpacing: '-0.2px', whiteSpace: 'nowrap', transition: 'background .18s ease, color .18s ease' }
   const segStyle = (on: boolean): CSSProperties => ({ ...seg1, background: on ? 'var(--seg-active, #fff)' : 'transparent', color: on ? 'var(--ink)' : 'var(--ink3)', boxShadow: on ? '0 4px 12px -4px rgba(17,24,39,0.28)' : 'none' })
 
-  const viewTitle = { heute: 'Heute', workouts: 'Workouts', schlaf: 'Schlaf & Erholung', trends: 'Trends' }[seg]
+  const viewTitle = { heute: 'Heute', workouts: 'Workouts', schlaf: 'Schlaf & Erholung', body: 'Body', trends: 'Trends' }[seg]
 
   return (
     <div data-theme={theme} style={{ minHeight: '100vh', boxSizing: 'border-box', background: 'var(--screen)', color: 'var(--ink)', padding: '26px 40px 60px', zoom: 0.9, overflowX: 'hidden' }}>
@@ -238,8 +262,8 @@ export default function Puls({ theme, onBack, onOpenTodos, onOpenCalendar, onOpe
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <div onClick={onBack} title="Zurück zu Mein Tag" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 16px', borderRadius: 16, ...GLASS, cursor: 'pointer', color: 'var(--ink)', fontSize: 14, fontWeight: 800 }}>‹ Mein Tag</div>
           <div style={{ display: 'flex', padding: 4, gap: 3, borderRadius: 16, ...GLASS }}>
-            {(['heute', 'workouts', 'schlaf', 'trends'] as Seg[]).map((s) => (
-              <div key={s} onClick={() => setSeg(s)} style={segStyle(seg === s)}>{{ heute: 'Heute', workouts: 'Workouts', schlaf: 'Schlaf', trends: 'Trends' }[s]}</div>
+            {(['heute', 'workouts', 'schlaf', 'body', 'trends'] as Seg[]).map((s) => (
+              <div key={s} onClick={() => setSeg(s)} style={segStyle(seg === s)}>{{ heute: 'Heute', workouts: 'Workouts', schlaf: 'Schlaf', body: 'Body', trends: 'Trends' }[s]}</div>
             ))}
           </div>
           <div style={{ flex: 1 }} />
@@ -269,6 +293,7 @@ export default function Puls({ theme, onBack, onOpenTodos, onOpenCalendar, onOpe
         {seg === 'heute' && <Heute daily={hDaily} sleep={hSleep} scores={hScores} intraday={hIntraday} workouts={workouts} employers={employers} weekWorkouts={hWeekWorkouts} weekPlanned={hWeekPlanned} weekDates={hWeekDates} selKey={hKey} realTodayKey={todayKey} hDay={hDay} canForward={canForward} showLatest={dayKey(hDay) < dayKey(latestDay)} onPrev={() => setHeuteDay(addDays(hDay, -1))} onNext={() => { if (canForward) setHeuteDay(addDays(hDay, 1)) }} onLatest={() => setHeuteDay(null)} onOpenDaySel={(d: Date) => { if (dayKey(d) <= dayKey(latestDay)) setHeuteDay(startOfDay(d)) }} view={view} colorOf={colorOf} openWorkout={openWorkout} />}
         {seg === 'workouts' && <Workouts workouts={workouts} employers={employers} projects={projects} view={view} colorOf={colorOf} openWorkout={openWorkout} areaFilter={areaFilter} setAreaFilter={setAreaFilter} rangeFilter={rangeFilter} setRangeFilter={setRangeFilter} monday={monday} />}
         {seg === 'schlaf' && <Schlaf sleepRange={sleepRange} />}
+        {seg === 'body' && <Body />}
         {seg === 'trends' && <Trends />}
       </div>
 
@@ -320,14 +345,15 @@ function IntradayChart({ pts, color, domainMax = 100, height = 84 }: { pts: Intr
   const n = vals.length
   const xx = (i: number) => (n > 1 ? (i / (n - 1)) * W : 0)
   const yy = (v: number) => height - 3 - (Math.max(0, Math.min(domainMax, v)) / domainMax) * (height - 6)
-  const line = vals.map((v, i) => `${i ? 'L' : 'M'}${xx(i).toFixed(1)} ${yy(v).toFixed(1)}`).join(' ')
-  const area = `M0 ${height} ${vals.map((v, i) => `L${xx(i).toFixed(1)} ${yy(v).toFixed(1)}`).join(' ')} L${W} ${height} Z`
+  const linePts = vals.map((v, i) => ({ x: xx(i), y: yy(v) }))
+  const line = monotoneD(linePts)
+  const area = linePts.length > 1 ? `M${linePts[0].x.toFixed(1)} ${height} L${line.slice(1)} L${W} ${height} Z` : ''
   const hpts: HoverPoint[] = pts.map((p) => ({ v: p.v, label: fmtClock(p.t) }))
   return (
     <div style={{ position: 'relative' }}>
       <svg width="100%" height={height} viewBox={`0 0 ${W} ${height}`} preserveAspectRatio="none" style={{ display: 'block', overflow: 'visible' }}>
         <path d={area} fill={hexA(color, 0.13)} stroke="none" />
-        <path d={line} fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+        <path d={line} fill="none" stroke={color} strokeWidth={2.4} vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
       <HoverOverlay pts={hpts} color={color} format={(v) => `${Math.round(v)}`} yFracAt={(i) => yy(vals[i]) / height} />
     </div>
@@ -795,6 +821,20 @@ function WorkoutHistory({ workouts, cats, onPickPeriod, activePeriodKey }: any) 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Body (Platzhalter) — Gewicht & Körperzusammensetzung; zieht später das Gewicht-Widget (4-2c) ein.
+function Body() {
+  return (
+    <div style={{ display: 'grid', placeItems: 'center', padding: '40px 0' }}>
+      <div style={{ ...CARD, borderRadius: 26, padding: '44px 40px', maxWidth: 460, textAlign: 'center' }}>
+        <div style={{ width: 60, height: 60, borderRadius: 18, margin: '0 auto', display: 'grid', placeItems: 'center', fontSize: 30, background: 'var(--track)' }}>⚖️</div>
+        <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-0.4px', marginTop: 20 }}>Gewicht &amp; Körperzusammensetzung</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink2)', lineHeight: 1.6, marginTop: 12 }}>In Vorbereitung. Sobald du dein Gewicht in Garmin Connect pflegst, entstehen hier Verlauf und Zusammensetzung.</div>
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Schlaf & Erholung (WP4c-1)
 function fmtDurSec(sec: number) { const m = Math.round(sec / 60); return m < 60 ? `${m} min` : `${Math.floor(m / 60)}h ${pad(m % 60)}` }
 const PHASES = [
@@ -964,7 +1004,7 @@ function Schlaf({ sleepRange }: { sleepRange: GarminSleep[] }) {
                   <div style={{ ...kicker, fontSize: 10.5, marginBottom: 8 }}>{label} · Nacht</div>
                   <div style={{ position: 'relative' }}>
                     <svg width="100%" height="40" viewBox="0 0 200 40" preserveAspectRatio="none" style={{ display: 'block', overflow: 'visible' }}>
-                      <path d={sparkPath(vals, 200, 40, 4)} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d={sparkPath(vals, 200, 40, 4)} fill="none" stroke={color} strokeWidth={2.4} vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                     <HoverOverlay pts={hpts} color={color} format={(v) => `${Math.round(v)}`} yFracAt={(i) => lineYFrac(vals, i, 4 / 40)} />
                   </div>
@@ -1004,7 +1044,7 @@ function Schlaf({ sleepRange }: { sleepRange: GarminSleep[] }) {
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
                   <div style={{ position: 'relative', width: 120, height: 30 }}>
                     <svg width="120" height="30" viewBox="0 0 120 30" preserveAspectRatio="none" style={{ overflow: 'visible', display: 'block' }}>
-                      <path d={sparkPath(series, 120, 30, 3)} fill="none" stroke={t.color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d={sparkPath(series, 120, 30, 3)} fill="none" stroke={t.color} strokeWidth={2.4} vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                     <HoverOverlay pts={hpts} color={t.color} format={(v) => `${Math.round(v)}${t.unit ? ' ' + t.unit : ''}`} yFracAt={(i) => lineYFrac(series, i, 3 / 30)} />
                   </div>
@@ -1091,8 +1131,12 @@ const ACWR_INFO = (p: number | null) => {
 }
 
 type WidgetOpts = { dist?: RaceDist }
-type Layout = { visible: string[]; hidden: string[]; colors: Record<string, string>; opts: Record<string, WidgetOpts> }
-function defaultLayout(): Layout { return { visible: WIDGETS.filter((w) => w.defaultVisible).map((w) => w.id), hidden: WIDGETS.filter((w) => !w.defaultVisible).map((w) => w.id), colors: {}, opts: {} } }
+// Widget-Größen (Spalten × Reihen), Raster max. 4 Spalten.
+type WSize = '1x1' | '2x1' | '2x2' | '4x1'
+const WSIZES: WSize[] = ['1x1', '2x1', '2x2', '4x1']
+const SIZE_DIM: Record<WSize, { c: number; r: number }> = { '1x1': { c: 1, r: 1 }, '2x1': { c: 2, r: 1 }, '2x2': { c: 2, r: 2 }, '4x1': { c: 4, r: 1 } }
+type Layout = { visible: string[]; hidden: string[]; colors: Record<string, string>; opts: Record<string, WidgetOpts>; sizes: Record<string, WSize> }
+function defaultLayout(): Layout { return { visible: WIDGETS.filter((w) => w.defaultVisible).map((w) => w.id), hidden: WIDGETS.filter((w) => !w.defaultVisible).map((w) => w.id), colors: {}, opts: {}, sizes: {} } }
 function reconcile(l: Layout): Layout {
   const known = new Set(WIDGETS.map((w) => w.id))
   const visible = (l.visible || []).filter((id) => known.has(id))
@@ -1103,7 +1147,9 @@ function reconcile(l: Layout): Layout {
   for (const [id, c] of Object.entries(l.colors || {})) if (known.has(id) && typeof c === 'string') colors[id] = c
   const opts: Record<string, WidgetOpts> = {}
   for (const [id, o] of Object.entries(l.opts || {})) if (known.has(id) && o) opts[id] = o
-  return { visible, hidden, colors, opts }
+  const sizes: Record<string, WSize> = {}
+  for (const [id, s] of Object.entries(l.sizes || {})) if (known.has(id) && (WSIZES as string[]).includes(s)) sizes[id] = s
+  return { visible, hidden, colors, opts, sizes }
 }
 
 type Maps = Record<Src, Map<string, Record<string, unknown>>>
@@ -1125,24 +1171,18 @@ function linePathGapped(vals: (number | null)[], w: number, h: number, p = 3): s
   const nn = vals.filter((v): v is number => v != null)
   if (nn.length < 2) return ''
   const mn = Math.min(...nn), mx = Math.max(...nn), r = mx - mn || 1, sx = w / (vals.length - 1)
-  let d = '', pen = false
-  vals.forEach((v, i) => { if (v == null) { pen = false; return } const x = i * sx, y = p + (h - 2 * p) - ((v - mn) / r) * (h - 2 * p); d += `${pen ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)} `; pen = true })
-  return d.trim()
-}
-// Messpunkte (Wertwechsel) für VO2max-Fortschreibungs-Kennzeichnung.
-function changeDots(vals: (number | null)[], w: number, h: number, p = 3): { x: number; y: number }[] {
-  const nn = vals.filter((v): v is number => v != null)
-  if (nn.length < 2) return []
-  const mn = Math.min(...nn), mx = Math.max(...nn), r = mx - mn || 1, sx = w / (vals.length - 1)
-  const dots: { x: number; y: number }[] = []
-  let prev: number | null = null
-  vals.forEach((v, i) => { if (v == null) return; if (prev == null || v !== prev) dots.push({ x: i * sx, y: p + (h - 2 * p) - ((v - mn) / r) * (h - 2 * p) }); prev = v })
-  return dots
+  // Zusammenhängende (lückenfreie) Abschnitte je monoton glätten, an Lücken neu ansetzen.
+  let d = '', seg: { x: number; y: number }[] = []
+  const flush = () => { if (seg.length) { d += (d ? ' ' : '') + monotoneD(seg); seg = [] } }
+  vals.forEach((v, i) => { if (v == null) { flush(); return } seg.push({ x: i * sx, y: p + (h - 2 * p) - ((v - mn) / r) * (h - 2 * p) }) })
+  flush()
+  return d
 }
 function fmtVal(w: WidgetDef, v: number): string { return w.fmt ? w.fmt(v) : `${w.decimals != null ? v.toFixed(w.decimals) : Math.round(v)}${w.unit ? ' ' + w.unit : ''}` }
 
-function WidgetBody({ w, maps, color, dist, onDist }: { w: WidgetDef; maps: Maps; color: string; dist: RaceDist; onDist: (d: RaceDist) => void }) {
+function WidgetBody({ w, maps, color, dist, onDist, size }: { w: WidgetDef; maps: Maps; color: string; dist: RaceDist; onDist: (d: RaceDist) => void; size: WSize }) {
   const accent = color
+  const dim = SIZE_DIM[size]
   const getFn = w.special === 'race' ? (r: Record<string, unknown>) => numN(r[RACE_COL[dist]]) : undefined
   const vals = buildSeries(w, maps, 90, getFn)
   const st = statsOf(vals)
@@ -1185,13 +1225,13 @@ function WidgetBody({ w, maps, color, dist, onDist }: { w: WidgetDef; maps: Maps
   }
 
   if (w.type === 'tagesverlauf') {
-    const last = vals.slice(-30)
+    const last = vals.slice(-(dim.c >= 2 ? 60 : 30)) // breitere Widgets zeigen mehr Historie
     const mx = Math.max(1, ...last.filter((v): v is number => v != null))
     return (
-      <div>
-        <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: '-0.6px', fontVariantNumeric: 'tabular-nums' }}>{fmtVal(w, st.last)}</div>
-        <div style={{ position: 'relative', marginTop: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 46 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+        <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: '-0.6px', fontVariantNumeric: 'tabular-nums', flex: 'none' }}>{fmtVal(w, st.last)}</div>
+        <div style={{ position: 'relative', marginTop: 8, flex: 1, minHeight: 46 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: '100%' }}>
             {last.map((v, i) => <div key={i} style={{ flex: 1, height: v != null ? `${(v / mx) * 100}%` : 0, background: accent, borderRadius: '3px 3px 1px 1px', opacity: 0.85 }} />)}
           </div>
           <HoverOverlay pts={dayHoverPts(last)} color={accent} format={(v) => fmtVal(w, v)} yFracAt={(i) => (last[i] == null ? null : 1 - (last[i] as number) / mx)} barMode />
@@ -1200,25 +1240,22 @@ function WidgetBody({ w, maps, color, dist, onDist }: { w: WidgetDef; maps: Maps
     )
   }
 
-  // sparkline (+ vo2max Messpunkte)
-  const dots = w.special === 'vo2max' ? changeDots(vals, 200, 46, 4) : []
+  // sparkline (+ vo2max Messpunkte) — Graph füllt die verfügbare Höhe (größer bei 2x2)
   return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flex: 'none' }}>
         <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.9px', fontVariantNumeric: 'tabular-nums' }}>{fmtVal(w, st.last)}</div>
         {w.special === 'load' && (() => { const p = numN((maps.scores.get(dayKey(new Date())) ?? [...maps.scores.values()][0] ?? {}).tr_acwr_percent); const a = ACWR_INFO(p); return <div style={{ fontSize: 11, fontWeight: 800, padding: '2px 8px', borderRadius: 7, background: `color-mix(in srgb, ${a.color} 16%, transparent)`, color: a.color }}>ACWR {a.label}</div> })()}
       </div>
-      {w.special === 'race' && <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink3)', marginTop: 3 }}>Geschätzte Bestzeit über {RACE_LABEL[dist]}</div>}
-      <div style={{ position: 'relative', marginTop: 8 }}>
-        <svg width="100%" height="46" viewBox="0 0 200 46" preserveAspectRatio="none" style={{ display: 'block', overflow: 'visible' }}>
-          <path d={linePathGapped(vals, 200, 46, 4)} fill="none" stroke={accent} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-          {dots.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r="2.6" fill={accent} />)}
+      {w.special === 'race' && <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink3)', marginTop: 3, flex: 'none' }}>Geschätzte Bestzeit über {RACE_LABEL[dist]}</div>}
+      <div style={{ position: 'relative', marginTop: 8, flex: 1, minHeight: 46 }}>
+        <svg width="100%" height="100%" viewBox="0 0 200 46" preserveAspectRatio="none" style={{ display: 'block', overflow: 'visible' }}>
+          <path d={linePathGapped(vals, 200, 46, 4)} fill="none" stroke={accent} strokeWidth={2.4} vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
         <HoverOverlay pts={dayHoverPts(vals)} color={accent} format={(v) => fmtVal(w, v)} yFracAt={(i) => lineYFrac(vals, i, 4 / 46)} />
       </div>
-      {w.special === 'vo2max' && <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink3)', marginTop: 4 }}>Punkte = gemessen · Linie fortgeschrieben</div>}
       {w.special === 'race' && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap', flex: 'none' }}>
           <RaceControl dist={dist} onDist={onDist} small />
           <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink3)' }}>Formprognose · kein Event</div>
         </div>
@@ -1229,7 +1266,7 @@ function WidgetBody({ w, maps, color, dist, onDist }: { w: WidgetDef; maps: Maps
 
 type ZoomPeriod = 'week' | 'month' | 'year' | 'all'
 // Großer Graph im Zoom-Modal mit lesbaren X/Y-Achsen (9.6) + Hover (9.1)
-function ZoomChart({ vals, period, bars, color, fmtValue, fmtTick, showDots }: { vals: (number | null)[]; period: ZoomPeriod; bars: boolean; color: string; fmtValue: (v: number) => string; fmtTick: (v: number) => string; showDots?: boolean }) {
+function ZoomChart({ vals, period, bars, color, fmtValue, fmtTick }: { vals: (number | null)[]; period: ZoomPeriod; bars: boolean; color: string; fmtValue: (v: number) => string; fmtTick: (v: number) => string }) {
   const H = 260, W = 900
   const nn = vals.filter((v): v is number => v != null)
   const dataMin = Math.min(...nn), dataMax = Math.max(...nn)
@@ -1238,10 +1275,10 @@ function ZoomChart({ vals, period, bars, color, fmtValue, fmtTick, showDots }: {
   const span = hi - lo || 1
   const yf = (v: number) => 1 - (v - lo) / span
   const n = vals.length, sx = W / (n - 1 || 1)
-  let dLine = '', pen = false
-  vals.forEach((v, i) => { if (v == null) { pen = false; return } dLine += `${pen ? 'L' : 'M'}${(i * sx).toFixed(1)} ${(yf(v) * H).toFixed(1)} `; pen = true })
-  const dots: { x: number; y: number }[] = []
-  if (showDots) { let prev: number | null = null; vals.forEach((v, i) => { if (v == null) return; if (prev == null || v !== prev) dots.push({ x: i * sx, y: yf(v) * H }); prev = v }) }
+  let dLine = '', lseg: { x: number; y: number }[] = []
+  const flushL = () => { if (lseg.length) { dLine += (dLine ? ' ' : '') + monotoneD(lseg); lseg = [] } }
+  vals.forEach((v, i) => { if (v == null) { flushL(); return } lseg.push({ x: i * sx, y: yf(v) * H }) })
+  flushL()
   const step = Math.max(1, Math.round(n / 6))
   const xIdx: number[] = []
   for (let i = 0; i < n; i += step) xIdx.push(i)
@@ -1265,8 +1302,7 @@ function ZoomChart({ vals, period, bars, color, fmtValue, fmtTick, showDots }: {
             <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'flex-end', gap: 1 }}>{vals.map((v, i) => <div key={i} style={{ flex: 1, height: v != null ? `${((v - lo) / span) * 100}%` : 0, background: color, opacity: 0.85, borderRadius: '2px 2px 0 0' }} />)}</div>
           ) : (
             <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, overflow: 'visible' }}>
-              <path d={dLine.trim()} fill="none" stroke={color} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-              {dots.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r="3.4" fill={color} />)}
+              <path d={dLine.trim()} fill="none" stroke={color} strokeWidth={2.6} vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           )}
           <HoverOverlay pts={dayHoverPts(vals)} color={color} format={fmtValue} yFracAt={(i) => (vals[i] == null ? null : yf(vals[i] as number))} barMode={bars} />
@@ -1515,7 +1551,7 @@ function ZoomModal({ w, maps, intraday, color, dist, onDist, age, sex, onClose }
 
         <div style={{ background: 'var(--card)', border: '1px solid var(--hair)', borderRadius: 18, padding: '18px 16px', marginTop: 20 }}>
           {st ? (
-            <ZoomChart vals={vals} period={period} bars={bars} color={color} fmtValue={(v) => fmtVal(w, v)} fmtTick={fmtTick} showDots={w.special === 'vo2max'} />
+            <ZoomChart vals={vals} period={period} bars={bars} color={color} fmtValue={(v) => fmtVal(w, v)} fmtTick={fmtTick} />
           ) : <div style={{ height: 260, display: 'grid', placeItems: 'center', color: 'var(--ink3)', fontWeight: 700 }}>Keine Daten im Zeitraum.</div>}
         </div>
 
@@ -1566,6 +1602,16 @@ function Trends() {
   const [zoom, setZoom] = useState<string | null>(null)
   const [colorPop, setColorPop] = useState<string | null>(null)
   const [colorPopRect, setColorPopRect] = useState<DOMRect | null>(null)
+  const [sizePop, setSizePop] = useState<string | null>(null)
+  const [sizePopRect, setSizePopRect] = useState<DOMRect | null>(null)
+  // Reflow: Spaltenzahl aus der Grid-Breite ableiten (max 4 → 3 → 2 → 1).
+  const gridRef = useRef<HTMLDivElement>(null)
+  const [cols, setCols] = useState(4)
+  useEffect(() => {
+    const el = gridRef.current; if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => { const w = el.clientWidth; setCols(w < 520 ? 1 : w < 780 ? 2 : w < 1060 ? 3 : 4) })
+    ro.observe(el); return () => ro.disconnect()
+  }, [])
   const [daily, setDaily] = useState<Record<string, unknown>[]>([])
   const [sleepR, setSleepR] = useState<Record<string, unknown>[]>([])
   const [scores, setScores] = useState<Record<string, unknown>[]>([])
@@ -1604,8 +1650,10 @@ function Trends() {
   function reorder(from: number, to: number) { if (!layout || from === to) return; const v = [...layout.visible]; const [m] = v.splice(from, 1); v.splice(to, 0, m); setLayout({ ...layout, visible: v }) }
   function setColor(id: string, hex: string | null) { if (!layout) return; const colors = { ...layout.colors }; if (hex) colors[id] = hex; else delete colors[id]; persist({ ...layout, colors }) }
   function setDist(id: string, dist: RaceDist) { if (!layout) return; persist({ ...layout, opts: { ...layout.opts, [id]: { ...layout.opts[id], dist } } }) }
+  function setSize(id: string, size: WSize) { if (!layout) return; const sizes = { ...layout.sizes }; if (size === '1x1') delete sizes[id]; else sizes[id] = size; persist({ ...layout, sizes }) }
   const colorOf = (id: string) => layout?.colors[id] ?? 'var(--accent)'
   const distOf = (id: string): RaceDist => layout?.opts[id]?.dist ?? '5k'
+  const sizeOf = (id: string): WSize => layout?.sizes[id] ?? '1x1'
 
   if (!layout) return <div style={{ ...CARD, borderRadius: 24, padding: '48px 26px', textAlign: 'center', color: 'var(--ink3)', fontWeight: 700 }}>Lädt…</div>
   const editBtn: CSSProperties = { display: 'flex', alignItems: 'center', gap: 7, padding: '9px 15px', borderRadius: 12, fontSize: 13, fontWeight: 800, cursor: 'pointer' }
@@ -1627,19 +1675,20 @@ function Trends() {
           <div onClick={() => { setEditing(true); setCatalogOpen(true) }} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, marginTop: 18, padding: '10px 18px', borderRadius: 12, background: 'var(--accent)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>+ Widget hinzufügen</div>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 18 }}>
-          {layout.visible.map((id, i) => { const w = WMAP.get(id); if (!w) return null; return (
-            <div key={id} draggable={editing} onDragStart={() => setDragIdx(i)} onDragOver={(e) => { if (!editing || dragIdx === null) return; e.preventDefault(); if (dragIdx !== i) { reorder(dragIdx, i); setDragIdx(i) } }} onDragEnd={() => { setDragIdx(null); setLayout((cur) => { if (cur) void api.updateSettings({ puls_trends_layout: JSON.stringify(cur) }); return cur }) }} onClick={() => { if (!editing) setZoom(id) }} style={{ ...CARD, position: 'relative', borderRadius: 22, padding: '18px 20px', opacity: dragIdx === i ? 0.5 : 1, cursor: editing ? 'grab' : 'pointer', outline: editing ? '1.5px dashed var(--hair)' : 'none' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-                <div style={{ width: 30, height: 30, borderRadius: 9, display: 'grid', placeItems: 'center', fontSize: 15, background: 'var(--track)' }}>{w.icon}</div>
+        <div ref={gridRef} style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridAutoRows: 196, gap: 18 }}>
+          {layout.visible.map((id, i) => { const w = WMAP.get(id); if (!w) return null; const sz = sizeOf(id); const dim = SIZE_DIM[sz]; return (
+            <div key={id} draggable={editing} onDragStart={() => setDragIdx(i)} onDragOver={(e) => { if (!editing || dragIdx === null) return; e.preventDefault(); if (dragIdx !== i) { reorder(dragIdx, i); setDragIdx(i) } }} onDragEnd={() => { setDragIdx(null); setLayout((cur) => { if (cur) void api.updateSettings({ puls_trends_layout: JSON.stringify(cur) }); return cur }) }} onClick={() => { if (!editing) setZoom(id) }} style={{ ...CARD, position: 'relative', gridColumn: `span ${Math.min(dim.c, cols)}`, gridRow: `span ${dim.r}`, display: 'flex', flexDirection: 'column', borderRadius: 22, padding: '18px 20px', overflow: 'hidden', opacity: dragIdx === i ? 0.5 : 1, cursor: editing ? 'grab' : 'pointer', outline: editing ? '1.5px dashed var(--hair)' : 'none' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4, flex: 'none' }}>
+                <div style={{ width: 30, height: 30, borderRadius: 9, display: 'grid', placeItems: 'center', fontSize: 15, background: 'var(--track)', flex: 'none' }}>{w.icon}</div>
                 <div style={{ fontSize: 13.5, fontWeight: 800, color: 'var(--ink)', flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{w.name}</div>
                 {editing ? (<>
+                  <div onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setSizePopRect(r); setSizePop(sizePop === id ? null : id) }} title="Größe" style={{ height: 24, padding: '0 7px', borderRadius: 7, display: 'grid', placeItems: 'center', cursor: 'pointer', background: 'var(--track)', flex: 'none', fontSize: 10.5, fontWeight: 800, color: 'var(--ink2)', fontVariantNumeric: 'tabular-nums' }}>{sz.replace('x', '×')}</div>
                   <div onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setColorPopRect(r); setColorPop(colorPop === id ? null : id) }} title="Farbe" style={{ width: 24, height: 24, borderRadius: 7, display: 'grid', placeItems: 'center', cursor: 'pointer', background: 'var(--track)', flex: 'none' }}><div style={{ width: 13, height: 13, borderRadius: '50%', background: colorOf(id), border: '1.5px solid var(--card)', boxShadow: '0 0 0 1px var(--hair)' }} /></div>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style={{ color: 'var(--ink3)', flex: 'none' }}><circle cx="9" cy="6" r="1.6" /><circle cx="15" cy="6" r="1.6" /><circle cx="9" cy="12" r="1.6" /><circle cx="15" cy="12" r="1.6" /><circle cx="9" cy="18" r="1.6" /><circle cx="15" cy="18" r="1.6" /></svg>
                   <div onClick={(e) => { e.stopPropagation(); remove(id) }} title="Entfernen" style={{ width: 24, height: 24, borderRadius: 7, display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#E5484D', background: 'var(--track)', flex: 'none' }}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg></div>
                 </>) : <div style={{ ...kicker, fontSize: 9.5, color: 'var(--ink3)' }}>{w.type}</div>}
               </div>
-              <WidgetBody w={w} maps={maps} color={colorOf(id)} dist={distOf(id)} onDist={(d) => setDist(id, d)} />
+              <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}><WidgetBody w={w} maps={maps} color={colorOf(id)} dist={distOf(id)} onDist={(d) => setDist(id, d)} size={sz} /></div>
               {editing && colorPop === id && colorPopRect && createPortal((() => {
                 const W = 210, estH = 200
                 const up = colorPopRect.bottom + estH > window.innerHeight - 8
@@ -1664,6 +1713,28 @@ function Trends() {
                           {isDefault ? 'Nutzt Akzentfarbe' : 'Auf Akzentfarbe zurücksetzen'}
                         </div>
                       ) })()}
+                    </div>
+                  </>
+                )
+              })(), document.body)}
+              {editing && sizePop === id && sizePopRect && createPortal((() => {
+                const W = 168, estH = 150
+                const up = sizePopRect.bottom + estH > window.innerHeight - 8
+                const left = Math.max(8, Math.min(window.innerWidth - W - 8, sizePopRect.right - W))
+                const vpos: CSSProperties = up ? { bottom: window.innerHeight - sizePopRect.top + 6 } : { top: sizePopRect.bottom + 6 }
+                return (
+                  <>
+                    <div onClick={() => setSizePop(null)} style={{ position: 'fixed', inset: 0, zIndex: 400 }} />
+                    <div onClick={(e) => e.stopPropagation()} style={{ position: 'fixed', left, ...vpos, zIndex: 401, width: W, borderRadius: 16, background: 'var(--glass-strong)', backdropFilter: 'blur(30px) saturate(180%)', WebkitBackdropFilter: 'blur(30px) saturate(180%)', border: '1px solid var(--border)', boxShadow: 'var(--shadow)', padding: 14, animation: 'popIn .15s ease' }}>
+                      <div style={{ ...kicker, fontSize: 10, marginBottom: 10 }}>Größe · Sp × Reihen</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                        {WSIZES.map((s) => { const on = sz === s; return (
+                          <div key={s} onClick={() => { setSize(id, s); setSizePop(null) }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, padding: '9px 8px', borderRadius: 10, cursor: 'pointer', background: on ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : 'var(--track)', border: on ? '1px solid color-mix(in srgb, var(--accent) 40%, transparent)' : '1px solid var(--hair)' }}>
+                            <div style={{ width: 16 * SIZE_DIM[s].c / (SIZE_DIM[s].c > 2 ? 2 : 1), maxWidth: 26, height: 8 * SIZE_DIM[s].r, borderRadius: 3, background: on ? 'var(--accent)' : 'var(--ink3)', flex: 'none' }} />
+                            <div style={{ fontSize: 12, fontWeight: 800, color: on ? 'var(--ink)' : 'var(--ink2)' }}>{s.replace('x', '×')}</div>
+                          </div>
+                        ) })}
+                      </div>
                     </div>
                   </>
                 )

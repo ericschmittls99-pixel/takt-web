@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type KeyboardEvent as ReactKeyboardEvent, type SetStateAction } from 'react'
-import { api, type Absence, type AbsenceType, type AppSettings, type AreaHours, type Employer, type Entry, type PlannedBlock, type PlannedOverride, type Project, type Todo } from '../api'
+import { api, type Absence, type AbsenceType, type AppSettings, type AreaHours, type Employer, type Entry, type GarminSleep, type PlannedBlock, type PlannedOverride, type Project, type Todo } from '../api'
 import { employerColor } from '../colors'
 import { playCheckChime } from '../sound'
 import { holidayName } from '../holidays'
@@ -136,12 +136,16 @@ function Ring24({
   tracked,
   planned,
   absence = [],
+  sleep = [],
+  sleepLabel,
   nowHour,
 }: {
   size: number
   tracked: RingSeg[]
   planned: RingSeg[]
   absence?: RingSeg[]
+  sleep?: { s: number; e: number }[]
+  sleepLabel?: string
   nowHour: number | null
 }) {
   const cx = size / 2
@@ -150,6 +154,7 @@ function Ring24({
   const innerR = outerR - 30
   const stroke = 16
   const gap = 0.07
+  const sleepR = innerR - stroke // eigener Radius innen, klar getrennt von Soll/Ist
 
   const nowA = nowHour != null ? hourAngle(nowHour) : null
   const [nlx1, nly1] = nowA != null ? polar(cx, cy, outerR + 11, nowA) : [0, 0]
@@ -161,6 +166,12 @@ function Ring24({
       {/* Tracks */}
       <circle cx={cx} cy={cy} r={outerR} fill="none" stroke="var(--track)" strokeWidth={stroke} />
       <circle cx={cx} cy={cy} r={innerR} fill="none" stroke="var(--track)" strokeWidth={stroke} />
+      {/* Schlaf-Segment (Kontext aus garmin_sleep) — dezent, eigener innerer Radius, klar von Buchungen/Plan getrennt */}
+      {sleep.map((p, i) => (
+        <path key={`s${i}`} d={arcPath(cx, cy, sleepR, p.s, p.e, gap)} stroke="#7C5CFF" strokeWidth={6} fill="none" strokeLinecap="round" opacity={0.4}>
+          {sleepLabel ? <title>{sleepLabel}</title> : null}
+        </path>
+      ))}
       {/* innerer Ring: Soll / geplant */}
       {planned.map((p, i) => (
         <path key={`p${i}`} onClick={p.onClick} d={arcPath(cx, cy, innerR, p.s, p.e, gap)} stroke={p.color} strokeWidth={stroke} fill="none" strokeLinecap="round" style={{ cursor: p.onClick ? 'pointer' : 'default' }} />
@@ -203,6 +214,8 @@ function HeroTile({
   tracked,
   planned,
   absence,
+  sleep = [],
+  sleepLabel,
   nowHour,
   plannedBlocks,
   trackedBlocks,
@@ -218,6 +231,8 @@ function HeroTile({
   tracked: RingSeg[]
   planned: RingSeg[]
   absence: RingSeg[]
+  sleep?: { s: number; e: number }[]
+  sleepLabel?: string
   nowHour: number | null
   plannedBlocks: TlPlanned[]
   trackedBlocks: TlTracked[]
@@ -308,7 +323,7 @@ function HeroTile({
         >
           {/* Ansicht 1: Ring */}
           <div style={{ width: '33.3333%', flex: 'none', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 18 }}>
-            <Ring24 size={240} tracked={tracked} planned={planned} absence={absence} nowHour={nowHour} />
+            <Ring24 size={240} tracked={tracked} planned={planned} absence={absence} sleep={sleep} sleepLabel={sleepLabel} nowHour={nowHour} />
             <div style={{ display: 'flex', gap: 18 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 700, color: 'var(--ink2)' }}>
                 <div style={{ width: 12, height: 12, borderRadius: 4, border: '2px solid var(--ink3)' }} />
@@ -879,6 +894,7 @@ export default function MeinTag({ theme, onOpenTodos, onOpenCalendar, onOpenAusw
   const [planned, setPlanned] = useState<PlannedBlock[]>([])
   const [overrides, setOverrides] = useState<PlannedOverride[]>([])
   const [absences, setAbsences] = useState<Absence[]>([])
+  const [sleepRows, setSleepRows] = useState<GarminSleep[]>([]) // garmin_sleep für Schlaf-Segment auf der 24h-Uhr
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -899,6 +915,11 @@ export default function MeinTag({ theme, onOpenTodos, onOpenCalendar, onOpenAusw
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000)
     return () => clearInterval(t)
+  }, [])
+
+  // Schlafdaten (nur Anzeige auf der 24h-Uhr), einmalig über den navigierbaren Bereich.
+  useEffect(() => {
+    api.getGarminSleep(dayKey(addDays(new Date(), -400)), dayKey(new Date())).then(setSleepRows).catch(() => {})
   }, [])
 
   async function loadEntries() {
@@ -1054,6 +1075,22 @@ export default function MeinTag({ theme, onOpenTodos, onOpenCalendar, onOpenAusw
 
   const isToday = dayKey(selectedDay) === dayKey(now)
   const nowHour = isToday ? hourOfDay(now) : null
+
+  // Schlaf-Segment für den angezeigten Tag: die Nacht "gehört" dem Aufwach-Tag (garmin_sleep.calendar_date).
+  // Start liegt i. d. R. am Vorabend → über Mitternacht in zwei Bögen aufteilen. Zeiten sind lokale Wanduhr.
+  const sleepClock = useMemo(() => {
+    const row = sleepRows.find((r) => r.calendar_date === dayKey(selectedDay))
+    const levels = row?.curves?.levels
+    if (!row || !levels || levels.length === 0) return null
+    const start = new Date(levels[0].startGMT.slice(0, 19))
+    const end = new Date(levels[levels.length - 1].endGMT.slice(0, 19))
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null
+    const sH = hourOfDay(start), eH = hourOfDay(end)
+    const segs = (sH > eH ? [{ s: sH, e: 24 }, { s: 0, e: eH }] : [{ s: sH, e: eH }]).filter((x) => x.e > x.s + 0.02)
+    if (segs.length === 0) return null
+    const secs = row.total_sec ?? Math.round((end.getTime() - start.getTime()) / 1000)
+    return { segs, label: `Schlaf · ${Math.floor(secs / 3600)}h ${pad2(Math.round((secs % 3600) / 60))}` }
+  }, [sleepRows, selectedDay])
 
   // Ist-Buchungen als Ring-Segmente (dezimale Stunden); laufender Eintrag bis jetzt.
   const trackedSegs = useMemo<RingSeg[]>(() => {
@@ -1500,6 +1537,8 @@ export default function MeinTag({ theme, onOpenTodos, onOpenCalendar, onOpenAusw
             tracked={trackedSegs}
             planned={plannedSegs}
             absence={absenceSegs}
+            sleep={sleepClock?.segs ?? []}
+            sleepLabel={sleepClock?.label}
             nowHour={nowHour}
             plannedBlocks={plannedTlBlocks}
             trackedBlocks={trackedTlBlocks}

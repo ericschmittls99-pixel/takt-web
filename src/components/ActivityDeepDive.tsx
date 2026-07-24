@@ -1,6 +1,9 @@
-import { useEffect, useState, type CSSProperties } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { api, type Employer, type GarminActivityDetail, type Project } from '../api'
 import { employerColor } from '../colors'
+import type { RouteHandle } from './RouteMap'
+// MapLibre ist groß → nur laden, wenn tatsächlich eine Strecke gezeigt wird (Code-Splitting).
+const RouteMap = lazy(() => import('./RouteMap'))
 
 // Deep-Dive-Modal (WP3). Öffnet aus der PULS-Pill (Mein Tag/Kalender). Datenquelle:
 // GET /api/garmin/activities/:id inkl. details-Payload. Alle Blöcke konditional.
@@ -53,6 +56,75 @@ function hexA(hex: string, a: number) {
   return `rgba(${parseInt(h.slice(0, 2), 16)},${parseInt(h.slice(2, 4), 16)},${parseInt(h.slice(4, 6), 16)},${a})`
 }
 
+const HERO_KEYS = new Set(['Distanz', 'Pace', 'Ø-Tempo', 'Dauer', 'Ø-HF', 'Load'])
+
+// Deep-Dive-Kopf v1d: 5 Hero-Stats mit gemeinsamem Animations-Takt (0,5 s/km, gedeckelt 8 s).
+// Distanz-Uhr + Pace (km-getaktet aus Splits) + Dauer laufen synchron zum Karten-Marker (via routeCtl).
+function HeroRun({ distanceKm, durationSec, avgPaceSec, bikeKmh, laps, hr, load, tTitle, tSub, routeCtl, start, reduced }: {
+  distanceKm: number; durationSec: number; avgPaceSec: number | null; bikeKmh: number | null; laps: { d: number; t: number }[]
+  hr: number | null; load: number | null; tTitle: string; tSub: string
+  routeCtl: React.RefObject<RouteHandle | null>; start: boolean; reduced: boolean
+}) {
+  const [p, setP] = useState(reduced ? 1 : 0)
+  const rafRef = useRef<number | undefined>(undefined)
+  const startedRef = useRef(false)
+  useEffect(() => {
+    if (!start || startedRef.current) return
+    startedRef.current = true
+    if (reduced || distanceKm <= 0) { setP(1); routeCtl.current?.showFull(); return }
+    const D = Math.min(8000, Math.max(600, distanceKm * 500)) // 0,5 s/km, gedeckelt 8 s
+    const t0 = performance.now()
+    const step = (now: number) => {
+      const pp = Math.min(1, (now - t0) / D)
+      setP(pp)
+      routeCtl.current?.drawTo(pp)
+      if (pp < 1) rafRef.current = requestAnimationFrame(step)
+      else routeCtl.current?.showFull()
+    }
+    rafRef.current = requestAnimationFrame(step)
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current) }
+  }, [start, reduced, distanceKm, routeCtl])
+
+  const done = p >= 1
+  // Pace (Lauf) bzw. Tempo (Rad) rastet je Split auf den Split-Wert — Rastung anhand der
+  // zurückgelegten Distanz, damit es lauflängen-unabhängig ist (Lauf ≈1 km, Rad ≈5 km). Am Ende Ø.
+  let paceSec = avgPaceSec
+  let lapKmh = bikeKmh
+  let step = 'avg' // Schlüssel für den Pop bei jedem Split-Wechsel (und am Ende)
+  if (!done && laps.length > 0 && distanceKm > 0 && (avgPaceSec != null || bikeKmh != null)) {
+    const covered = p * distanceKm * 1000 // Meter
+    let acc = 0, i = 0
+    for (; i < laps.length - 1; i++) { acc += laps[i].d; if (covered < acc) break }
+    const lap = laps[i]
+    step = `L${i}`
+    if (bikeKmh != null) lapKmh = (lap.d / lap.t) * 3.6
+    else paceSec = lap.t / (lap.d / 1000)
+  }
+
+  const cells: { v: string; u: string; label: string; pulse?: string }[] = []
+  cells.push({ v: (p * distanceKm).toFixed(1).replace('.', ','), u: 'km', label: 'Distanz' })
+  if (durationSec > 0) cells.push({ v: fmtDur(Math.round(p * durationSec)), u: '', label: 'Dauer' })
+  if (bikeKmh != null) cells.push({ v: (lapKmh ?? bikeKmh).toFixed(1).replace('.', ','), u: 'km/h', label: 'Tempo', pulse: step })
+  else if (paceSec != null) cells.push({ v: `${Math.floor(paceSec / 60)}:${pad(Math.round(paceSec % 60))}`, u: '/km', label: 'Pace', pulse: step })
+  if (hr != null) cells.push({ v: String(Math.round(hr)), u: 'bpm', label: 'Ø-HF' })
+  if (load != null) cells.push({ v: String(Math.round(load)), u: '', label: 'Load' })
+
+  return (
+    <div style={{ padding: '20px 28px 8px', display: 'grid', gridTemplateColumns: `repeat(${cells.length}, 1fr)`, gap: 10 }}>
+      {cells.map((c) => (
+        <div key={c.label}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 3 }}>
+            {/* pulse: bei Pace remountet der Wert je km-Wechsel → checkPop-Pop macht die Rastung sichtbar */}
+            <div key={c.pulse ?? 'v'} style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.8px', color: tTitle, fontVariantNumeric: 'tabular-nums', animation: c.pulse ? 'checkPop .34s ease' : undefined, transformOrigin: 'left center' }}>{c.v}</div>
+            {c.u && <div style={{ fontSize: 12, fontWeight: 700, color: tSub }}>{c.u}</div>}
+          </div>
+          <div style={{ ...kicker, fontSize: 10, marginTop: 5, color: tSub }}>{c.label}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 type Form = { duration_min: string; distance_km: string; calories: string; avg_hr: string; max_hr: string }
 const GLASS_STRONG: CSSProperties = { background: 'var(--glass-strong)', backdropFilter: 'blur(30px) saturate(180%)', WebkitBackdropFilter: 'blur(30px) saturate(180%)' }
 const kicker: CSSProperties = { fontSize: 11, fontWeight: 800, letterSpacing: '1.4px', textTransform: 'uppercase', color: 'var(--ink3)' }
@@ -74,9 +146,25 @@ export default function ActivityDeepDive({ activityId, employers, projects, onCl
   const [savingEx, setSavingEx] = useState(false)
   const [exForm, setExForm] = useState<{ name: string; sets: string; reps: string; max_weight: string }[]>([])
   const [gm, setGm] = useState<string[]>(['hr'])  // aktive Verlaufs-Metriken (überlagerbar)
+  const [titleEdit, setTitleEdit] = useState(false)
+  const [titleDraft, setTitleDraft] = useState('')
+  const [mapReady, setMapReady] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
+  const routeCtl = useRef<RouteHandle | null>(null)
+  const reduced = typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+
+  function startTitleEdit() { if (!a) return; setTitleDraft(a.name ?? ''); setTitleEdit(true) }
+  async function saveTitle() {
+    if (!a) { setTitleEdit(false); return }
+    const name = titleDraft.trim()
+    if (!name || name === a.name) { setTitleEdit(false); return }
+    try { await api.renameGarminActivity(activityId, name); setA({ ...a, name }); onChanged() } catch { /* ignore */ }
+    setTitleEdit(false)
+  }
 
   function load() {
     setLoading(true)
+    setMapReady(false); routeCtl.current = null // Animations-Takt für die (neue) Aktivität zurücksetzen
     api.getGarminActivity(activityId).then((d) => { setA(d); setLoading(false) }).catch(() => setLoading(false))
   }
   useEffect(load, [activityId])
@@ -178,15 +266,11 @@ export default function ActivityDeepDive({ activityId, employers, projects, onCl
     if (a.training_load != null) kpis.push({ k: 'Load', v: String(Math.round(a.training_load)), u: '' })
     if (a.aerobic_te != null) kpis.push({ k: 'Aerober Effekt', v: a.aerobic_te.toFixed(1).replace('.', ','), u: '' })
     if (a.anaerobic_te != null) kpis.push({ k: 'Anaerober Effekt', v: a.anaerobic_te.toFixed(1).replace('.', ','), u: '' })
-    if (a.vo2max != null) kpis.push({ k: 'VO₂max', v: String(Math.round(a.vo2max)), u: '' })
     if (a.total_sets) kpis.push({ k: 'Sätze', v: String(a.total_sets), u: '' })
     if (a.total_reps) kpis.push({ k: 'Wdh', v: a.total_reps.toLocaleString('de-DE'), u: '' })
     // Aus den Detailserien (nur falls im Payload vorhanden):
     const cadVals = (details.series?.cadence ?? []).filter(nn)
-    if (cadVals.length > 1) {
-      kpis.push({ k: 'Ø Cadence', v: String(Math.round(avg(cadVals))), u: isBike ? 'rpm' : 'spm' })
-      kpis.push({ k: 'Max Cadence', v: String(Math.round(Math.max(...cadVals))), u: isBike ? 'rpm' : 'spm' })
-    }
+    if (cadVals.length > 1) kpis.push({ k: 'Ø Cadence', v: String(Math.round(avg(cadVals))), u: isBike ? 'rpm' : 'spm' })
     const spdVals = (details.series?.speed ?? []).filter(nn).filter((v) => v > 0.3)
     if (spdVals.length > 1 && !isBike) kpis.push({ k: 'Beste Pace', v: paceStr(1000 / Math.max(...spdVals)), u: '/km' })
     const t = details.temp
@@ -248,6 +332,23 @@ export default function ActivityDeepDive({ activityId, employers, projects, onCl
     }))
   const hasSplits = splits.length > 0
 
+  // Hero-Kopf (v1d): animierte Distanz/Pace/Dauer + km-getaktete Split-Pace
+  const distanceKm = a?.distance_m ? a.distance_m / 1000 : 0
+  const durationSec = a?.duration_sec ?? 0
+  const avgPaceSec = isRun && distanceKm > 0 && durationSec > 0 ? durationSec / distanceKm : null
+  const bikeKmh = isBike && distanceKm > 0 && durationSec > 0 ? distanceKm / (durationSec / 3600) : null
+  // Roh-Laps (Distanz+Dauer je Split; Lauf ≈1 km, Rad ≈5 km) — Basis für Hero-Animation und Bar-Chart.
+  const laps = (details.splits ?? [])
+    .map((s) => ({ d: num(s.distance), t: num(s.duration) }))
+    .filter((s): s is { d: number; t: number } => s.d != null && s.d > 100 && s.t != null && s.t > 0)
+  const moreKpis = kpis.filter((k) => !HERO_KEYS.has(k.k))
+  // Splits als Bar-Chart (Pace/Tempo je Split). Balkenlänge ∝ Geschwindigkeit (schneller = länger).
+  const splitBars = laps.map((s) => ({ mps: s.d / s.t, paceSec: s.t / (s.d / 1000) }))
+  const maxMps = splitBars.length ? Math.max(...splitBars.map((b) => b.mps)) : 1
+  // Nennlänge eines Splits aus dem längsten (vollen) Lap ableiten — Lauf ≈1 km, Rad ≈5 km.
+  const splitKm = laps.length ? Math.round(Math.max(...laps.map((l) => l.d)) / 1000) : 1
+  const splitLabel = splitKm <= 1 ? 'Splits · pro Kilometer' : `Splits · pro ${splitKm} km`
+
   // Übungssätze (Kraft)
   const exercises = (details.exercise_sets ?? []).map((e) => {
     const sets = num(e.sets), reps = num(e.reps), maxW = num(e.maxWeight)
@@ -268,6 +369,17 @@ export default function ActivityDeepDive({ activityId, employers, projects, onCl
   const field: CSSProperties = { width: '100%', boxSizing: 'border-box', borderRadius: 12, border: '1px solid var(--hair)', background: 'var(--track)', padding: '9px 11px', fontSize: 15, fontWeight: 700, color: 'var(--ink)', fontFamily: 'inherit', outline: 'none' }
   const chip = (on: boolean): CSSProperties => ({ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '7px 12px', borderRadius: 11, cursor: 'pointer', background: on ? 'color-mix(in srgb, var(--accent) 13%, transparent)' : 'var(--track)', border: on ? '1.5px solid var(--accent)' : '1px solid var(--hair)', color: on ? 'var(--ink)' : 'var(--ink2)', fontSize: 13, fontWeight: 800 })
 
+  // Hero-Header: Streckenanimation als Hintergrund hinter Titel/Tags (nur mit GPS). Schriftfarben dann hell.
+  const gpsPts = Array.isArray(details.gps) ? details.gps : []
+  const heroMap = gpsPts.length > 1
+  const tTitle = heroMap ? '#fff' : 'var(--ink)'
+  const tSub = heroMap ? 'rgba(255,255,255,0.85)' : 'var(--ink2)'
+  const tMuted = heroMap ? 'rgba(255,255,255,0.72)' : 'var(--ink3)'
+  const hBtn = heroMap ? 'rgba(255,255,255,0.28)' : 'var(--track)'
+  const hTag = heroMap ? 'rgba(255,255,255,0.26)' : 'var(--track)'
+  // Stärkerer Glass-Effekt für die Tags/Buttons über der Karte
+  const heroGlass: CSSProperties = heroMap ? { backdropFilter: 'blur(12px) saturate(150%)', WebkitBackdropFilter: 'blur(12px) saturate(150%)', border: '1px solid rgba(255,255,255,0.24)' } : {}
+
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 40, boxSizing: 'border-box', background: 'var(--veil)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)' }}>
       <div onClick={onClose} style={{ position: 'absolute', inset: 0 }} />
@@ -276,65 +388,84 @@ export default function ActivityDeepDive({ activityId, employers, projects, onCl
           <div style={{ padding: 60, textAlign: 'center', color: 'var(--ink3)', fontWeight: 700 }}>{loading ? 'Lädt…' : 'Keine Daten'}</div>
         ) : (
           <>
-            {/* Head */}
-            <div style={{ padding: '26px 28px 20px', borderBottom: '1px solid var(--hair)' }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
-                <div style={{ width: 52, height: 52, borderRadius: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26, background: hexA(color, 0.16), flex: 'none' }}>{TYPE_EMOJI[type] ?? '🏅'}</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: '-0.6px', color: 'var(--ink)' }}>{a.name ?? TYPE_LABEL[type] ?? 'Workout'}</div>
-                  <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--ink2)', marginTop: 3 }}>{TYPE_LABEL[type] ?? type} · {fmtDate(a.start_ts)}</div>
+            {/* Head — mit GPS: Streckenanimation als Hintergrund hinter Titel/Tags bis zum Trennstrich */}
+            <div style={{ position: 'relative', borderBottom: '1px solid var(--hair)', ...(heroMap ? { minHeight: 275, overflow: 'hidden', borderTopLeftRadius: 30, borderTopRightRadius: 30 } : {}) }}>
+              {heroMap && (<>
+                <div style={{ position: 'absolute', inset: 0 }}>
+                  <Suspense fallback={<div style={{ position: 'absolute', inset: 0, background: 'var(--track)' }} />}>
+                    <RouteMap key={activityId} hero reduced={reduced} onReady={(h) => { routeCtl.current = h; setMapReady(true) }} gps={gpsPts.map((p) => [p[1], p[0]] as [number, number])} speed={details.series?.speed} hr={details.series?.hr} />
+                  </Suspense>
                 </div>
-                {canEdit && !editing && (
-                  <div onClick={startEdit} title="KPIs bearbeiten" style={{ padding: '8px 14px', borderRadius: 11, background: 'var(--track)', color: 'var(--ink)', fontWeight: 800, fontSize: 13, cursor: 'pointer', flex: 'none' }}>Bearbeiten</div>
-                )}
-                {a.entry_id != null && onEditEntry && (
-                  <div onClick={() => { onEditEntry(a.entry_id!); onClose() }} title="Eintrag bearbeiten (Zeit/Bereich/Notiz)" style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--track)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--ink2)', flex: 'none' }}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
-                  </div>
-                )}
-                <div onClick={onClose} style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--track)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--ink2)', flex: 'none' }}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
-                </div>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 16, flexWrap: 'wrap' }}>
-                {emp && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 13px', borderRadius: 11, background: 'var(--track)' }}>
-                    <div style={{ width: 9, height: 9, borderRadius: '50%', background: color }} />
-                    <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--ink)' }}>{emp.icon} {emp.name}</div>
-                  </div>
-                )}
-                {proj && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 13px', borderRadius: 11, background: canEdit ? 'transparent' : 'var(--track)', border: canEdit ? '1px dashed var(--hair)' : '1px solid transparent' }}>
-                    <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--ink2)' }}>{proj.name}</div>
-                  </div>
-                )}
-                {canEdit && <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink3)' }}>Manueller Eintrag</div>}
-              </div>
-
-              {/* Bereich/Projekt bearbeiten (nur im Edit-Modus) */}
-              {editing && (
-                <div style={{ marginTop: 16 }}>
-                  <div style={{ ...kicker, marginBottom: 8 }}>Bereich</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
-                    {sportAreas.map((e) => (
-                      <div key={e.id} onClick={() => assign(e.id, null)} style={chip(e.id === a.employer_id)}>
-                        <div style={{ width: 9, height: 9, borderRadius: '50%', background: e.color || employerColor(e.id) }} />
-                        <span>{e.icon} {e.name}</span>
+                <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: 'linear-gradient(180deg, rgba(12,17,28,0.64) 0%, rgba(12,17,28,0.34) 30%, rgba(12,17,28,0) 58%)' }} />
+              </>)}
+              <div style={{ position: 'relative', zIndex: 3, padding: '26px 28px 20px' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+                  <div style={{ width: 52, height: 52, borderRadius: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26, background: heroMap ? 'rgba(255,255,255,0.26)' : hexA(color, 0.16), flex: 'none', ...heroGlass }}>{TYPE_EMOJI[type] ?? '🏅'}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    {titleEdit ? (
+                      <input autoFocus value={titleDraft} onChange={(e) => setTitleDraft(e.target.value)} onBlur={saveTitle} onKeyDown={(e) => { if (e.key === 'Enter') void saveTitle(); if (e.key === 'Escape') setTitleEdit(false) }} maxLength={200} style={{ fontSize: 24, fontWeight: 800, letterSpacing: '-0.6px', color: tTitle, background: 'transparent', border: 'none', borderBottom: `2px solid ${heroMap ? 'rgba(255,255,255,0.6)' : 'var(--hair)'}`, outline: 'none', width: '100%', boxSizing: 'border-box', fontFamily: 'inherit', padding: '0 0 2px' }} />
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                        <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: '-0.6px', color: tTitle, textShadow: heroMap ? '0 1px 10px rgba(0,0,0,0.35)' : 'none', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.name ?? TYPE_LABEL[type] ?? 'Workout'}</div>
+                        <div onClick={startTitleEdit} title="Titel ändern" style={{ flex: 'none', display: 'grid', placeItems: 'center', cursor: 'pointer', color: tSub, opacity: 0.9 }}>
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+                        </div>
                       </div>
-                    ))}
+                    )}
+                    <div style={{ fontSize: 13.5, fontWeight: 700, color: tSub, marginTop: 3 }}>{TYPE_LABEL[type] ?? type} · {fmtDate(a.start_ts)}</div>
                   </div>
-                  {areaProjects.length > 0 && (
-                    <>
-                      <div style={{ ...kicker, margin: '14px 0 8px' }}>Projekt</div>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
-                        {areaProjects.map((p) => (
-                          <div key={p.id} onClick={() => assign(a.employer_id as number, p.id === a.project_id ? null : p.id)} style={chip(p.id === a.project_id)}>{p.name}</div>
-                        ))}
-                      </div>
-                    </>
+                  {canEdit && !editing && (
+                    <div onClick={startEdit} title="KPIs bearbeiten" style={{ padding: '8px 14px', borderRadius: 11, background: hBtn, color: tTitle, fontWeight: 800, fontSize: 13, cursor: 'pointer', flex: 'none', ...heroGlass }}>Bearbeiten</div>
                   )}
+                  {a.entry_id != null && onEditEntry && (
+                    <div onClick={() => { onEditEntry(a.entry_id!); onClose() }} title="Eintrag bearbeiten (Zeit/Bereich/Notiz)" style={{ width: 36, height: 36, borderRadius: '50%', background: hBtn, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: tSub, flex: 'none', ...heroGlass }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+                    </div>
+                  )}
+                  <div onClick={onClose} style={{ width: 36, height: 36, borderRadius: '50%', background: hBtn, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: tSub, flex: 'none', ...heroGlass }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                  </div>
                 </div>
-              )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 16, flexWrap: 'wrap' }}>
+                  {emp && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 13px', borderRadius: 11, background: hTag, ...heroGlass }}>
+                      <div style={{ width: 9, height: 9, borderRadius: '50%', background: color }} />
+                      <div style={{ fontSize: 13, fontWeight: 800, color: tTitle }}>{emp.name}</div>
+                    </div>
+                  )}
+                  {proj && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 13px', borderRadius: 11, background: canEdit ? 'transparent' : hTag, border: canEdit ? `1px dashed ${heroMap ? 'rgba(255,255,255,0.4)' : 'var(--hair)'}` : '1px solid transparent', ...(canEdit ? {} : heroGlass) }}>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: tSub }}>{proj.name}</div>
+                    </div>
+                  )}
+                  {canEdit && <div style={{ fontSize: 12, fontWeight: 700, color: tMuted }}>Manueller Eintrag</div>}
+                </div>
+
+                {/* Bereich/Projekt bearbeiten (nur im Edit-Modus) */}
+                {editing && (
+                  <div style={{ marginTop: 16 }}>
+                    <div style={{ ...kicker, color: tMuted, marginBottom: 8 }}>Bereich</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+                      {sportAreas.map((e) => (
+                        <div key={e.id} onClick={() => assign(e.id, null)} style={chip(e.id === a.employer_id)}>
+                          <div style={{ width: 9, height: 9, borderRadius: '50%', background: e.color || employerColor(e.id) }} />
+                          <span>{e.icon} {e.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                    {areaProjects.length > 0 && (
+                      <>
+                        <div style={{ ...kicker, color: tMuted, margin: '14px 0 8px' }}>Projekt</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+                          {areaProjects.map((p) => (
+                            <div key={p.id} onClick={() => assign(a.employer_id as number, p.id === a.project_id ? null : p.id)} style={chip(p.id === a.project_id)}>{p.name}</div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* KPI row bzw. Edit-Formular */}
@@ -353,6 +484,51 @@ export default function ActivityDeepDive({ activityId, employers, projects, onCl
                   <div onClick={() => setEditing(false)} style={{ padding: '11px 18px', borderRadius: 12, color: 'var(--ink3)', fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>Abbrechen</div>
                 </div>
               </div>
+            ) : heroMap ? (
+              <>
+                <HeroRun key={activityId} distanceKm={distanceKm} durationSec={durationSec} avgPaceSec={avgPaceSec} bikeKmh={bikeKmh} laps={laps} hr={a.avg_hr ?? null} load={a.training_load ?? null} tTitle="var(--ink)" tSub="var(--ink3)" routeCtl={routeCtl} start={mapReady} reduced={reduced} />
+                {(moreKpis.length > 0 || hasSplits) && (
+                  <div style={{ padding: '2px 28px 6px' }}>
+                    <div onClick={() => setMoreOpen((o) => !o)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 12px', borderRadius: 10, cursor: 'pointer', fontSize: 12.5, fontWeight: 800, color: 'var(--ink2)', background: 'var(--track)' }}>
+                      Mehr Details
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" style={{ transform: moreOpen ? 'rotate(180deg)' : 'none', transition: 'transform .18s ease' }}><path d="M6 9l6 6 6-6" /></svg>
+                    </div>
+                    {moreOpen && (
+                      <div style={{ marginTop: 14 }}>
+                        {moreKpis.length > 0 && (
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 12 }}>
+                            {moreKpis.map((k, i) => (
+                              <div key={i} style={{ background: 'var(--card)', border: '1px solid var(--hair)', borderRadius: 16, padding: '14px 15px' }}>
+                                <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+                                  <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.6px', color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{k.v}</div>
+                                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink3)' }}>{k.u}</div>
+                                </div>
+                                <div style={{ ...kicker, fontSize: 10.5, marginTop: 5 }}>{k.k}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {splitBars.length > 0 && (
+                          <div style={{ marginTop: moreKpis.length > 0 ? 18 : 0 }}>
+                            <div style={{ ...kicker, marginBottom: 10 }}>{splitLabel}</div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                              {splitBars.map((b, i) => (
+                                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                  <div style={{ width: 24, textAlign: 'right', fontSize: 12, fontWeight: 800, color: 'var(--ink3)', fontVariantNumeric: 'tabular-nums', flex: 'none' }}>{i + 1}</div>
+                                  <div style={{ flex: 1, height: 22, borderRadius: 7, background: 'var(--track)', overflow: 'hidden' }}>
+                                    <div style={{ height: '100%', width: `${Math.max(6, (b.mps / maxMps) * 100)}%`, background: hexA(color, 0.85), borderRadius: 7 }} />
+                                  </div>
+                                  <div style={{ width: 82, textAlign: 'right', fontSize: 12.5, fontWeight: 800, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums', flex: 'none' }}>{isBike ? `${(b.mps * 3.6).toFixed(1).replace('.', ',')} km/h` : `${paceStr(b.paceSec)} /km`}</div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
             ) : kpis.length > 0 && (
               <div style={{ padding: '22px 28px 6px' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 12 }}>
@@ -468,8 +644,8 @@ export default function ActivityDeepDive({ activityId, employers, projects, onCl
               </div>
             )}
 
-            {/* Splits */}
-            {hasSplits && (
+            {/* Splits (nur ohne Hero-Kopf; im Hero-Fall stecken sie im "Mehr Details"-Akkordeon) */}
+            {!heroMap && hasSplits && (
               <div style={{ padding: '4px 28px 8px' }}>
                 <div style={{ ...kicker, marginBottom: 12 }}>Splits</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>

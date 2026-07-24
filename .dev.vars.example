@@ -1,0 +1,5 @@
+# Vorlage für .dev.vars — kopieren nach .dev.vars und Werte einsetzen.
+# .dev.vars selbst ist gitignored, damit Secrets lokal bleiben.
+# In Produktion denselben Wert im Cloudflare-Pages-Dashboard als
+# Environment Variable / Secret hinterlegen (analog zum D1-Binding).
+MAPTILER_KEY=dein-maptiler-key-hier

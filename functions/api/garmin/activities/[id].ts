@@ -34,6 +34,8 @@ interface PatchBody {
   max_hr?: unknown
   // action='edit-exercises': [{ name, sets, reps, max_weight }]
   exercises?: unknown
+  // action='rename': neuer Titel (jede Aktivität)
+  name?: unknown
 }
 
 const EDIT_COLS = ['duration_sec', 'distance_m', 'calories', 'avg_hr', 'max_hr'] as const
@@ -69,8 +71,16 @@ export const onRequestPatch: PagesFunction<Env, 'id'> = async ({ env, request, p
 
   const body = (await request.json()) as PatchBody
   const action = body.action
-  if (action !== 'assign' && action !== 'ignore' && action !== 'unassign' && action !== 'edit' && action !== 'edit-exercises') {
-    return badRequest("action muss 'assign', 'ignore', 'unassign', 'edit' oder 'edit-exercises' sein")
+  if (action !== 'assign' && action !== 'ignore' && action !== 'unassign' && action !== 'edit' && action !== 'edit-exercises' && action !== 'rename') {
+    return badRequest("action muss 'assign', 'ignore', 'unassign', 'edit', 'edit-exercises' oder 'rename' sein")
+  }
+
+  if (action === 'rename') {
+    // Titel/Name jeder Aktivität änderbar (kosmetisch). Sync überschreibt name nicht mehr (aus ACT_MEASURE entfernt).
+    const name = typeof (body as Record<string, unknown>).name === 'string' ? ((body as Record<string, unknown>).name as string).trim() : ''
+    if (!name) return badRequest('Name darf nicht leer sein')
+    await env.DB.prepare('UPDATE activities SET name = ? WHERE id = ?').bind(name.slice(0, 200), id).run()
+    return json(await env.DB.prepare('SELECT * FROM activities WHERE id = ?').bind(id).first())
   }
 
   if (action === 'edit-exercises') {

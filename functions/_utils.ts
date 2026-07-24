@@ -1,5 +1,6 @@
 export interface Env {
   DB: D1Database
+  MAPTILER_KEY?: string // Secret aus .dev.vars (lokal) bzw. Pages-Env (Prod); nie ins Bundle
 }
 
 export function json(data: unknown, init: ResponseInit = {}): Response {
